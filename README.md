@@ -1,4 +1,4 @@
-# Antigravity Stock Screener Dashboard
+# My Stock Screener App
 
 An advanced stock screening and charting dashboard built with **FastAPI** (Python) and **React** (TypeScript/Vite). This application is designed to identify high-probability trading setups by scanning watchlists or the entire US stock market for Stage 2 uptrends using three powerful technical analysis strategies.
 

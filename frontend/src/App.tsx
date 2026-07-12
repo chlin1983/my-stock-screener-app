@@ -654,9 +654,9 @@ function App() {
                   ☰ Config
                 </button>
               )}
-              <div className="logo-icon">V</div>
+              <div className="logo-icon">S</div>
               <div className="logo-text">
-                <h1>Antigravity Stock Screener</h1>
+                <h1>My Stock Screener App</h1>
                 <p>Stage 2 Uptrends, MA20 Pullbacks, Minervini VCP &amp; GMMA</p>
               </div>
             </div>
