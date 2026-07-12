@@ -1,0 +1,29 @@
+# Frontend Node modules and builds
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+
+# Backend cache and environments
+backend/__pycache__/
+backend/cache/
+backend/.venv/
+backend/env/
+backend/venv/
+
+# Python artifacts
+*.py[cod]
+*$py.class
+
+# IDE configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+Thumbs.db
