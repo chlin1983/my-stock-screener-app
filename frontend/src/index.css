@@ -2011,4 +2011,274 @@ kbd {
   gap: 12px;
 }
 
+/* =============================================
+   Main Dashboard Navigation Tabs
+   ============================================= */
+.dashboard-navigation-tabs {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 8px;
+}
 
+.dashboard-nav-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--color-text-muted);
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  font-family: var(--font-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dashboard-nav-tab:hover {
+  color: var(--color-text-main);
+}
+
+.dashboard-nav-tab.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+/* =============================================
+   Portfolio Dashboard Layout
+   ============================================= */
+.portfolio-dashboard-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* portfolio-main-grid removed — layout is now full-width stacked columns */
+
+
+.portfolio-chart-card {
+  padding: 20px;
+  border-radius: var(--border-radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.portfolio-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.chart-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.legend-badge-ytd {
+  background: #eab308; /* Match theme amber */
+  color: #000000;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.legend-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #3b82f6; /* Settlement blue */
+  display: inline-block;
+}
+
+.portfolio-chart-container {
+  width: 100%;
+  min-height: 400px;
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+}
+
+.portfolio-table-wrapper {
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.portfolio-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px;
+  gap: 16px;
+  color: var(--color-text-muted);
+}
+
+.card-value-container {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* =============================================
+   Trade Log Table
+   ============================================= */
+.trade-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.trade-log-table thead tr {
+  background: var(--glass-bg);
+  border-bottom: 2px solid var(--glass-border);
+}
+
+.trade-log-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.trade-log-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--glass-border);
+  vertical-align: middle;
+}
+
+.trade-row {
+  transition: background 0.15s ease;
+}
+
+.trade-row:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.trade-row-buy {
+  border-left: 3px solid rgba(16, 185, 129, 0.4);
+}
+
+.trade-row-sell {
+  border-left: 3px solid rgba(239, 68, 68, 0.4);
+}
+
+/* Type badge */
+.trade-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge-buy {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.badge-sell {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* Filter pills */
+.trade-filter-pill {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-main);
+}
+
+.trade-filter-pill:hover {
+  background: var(--glass-bg);
+  color: var(--color-text-main);
+}
+
+.trade-filter-pill.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+}
+
+.trade-filter-pill.buy.active {
+  background: #10b981;
+  border-color: #10b981;
+}
+
+.trade-filter-pill.sell.active {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
+/* Search input */
+.trade-search-input {
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--color-text-main);
+  font-size: 13px;
+  width: 200px;
+  font-family: var(--font-main);
+  transition: border-color 0.2s ease;
+}
+
+.trade-search-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+/* Delete button */
+.trade-delete-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0.4;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.trade-delete-btn:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.trade-delete-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.2;
+}

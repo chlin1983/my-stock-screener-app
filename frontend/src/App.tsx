@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { ChartPanel } from './components/ChartPanel';
 import { WatchlistManager } from './components/WatchlistManager';
+import { PortfolioDashboard } from './components/PortfolioDashboard';
+import { PortfolioSidebarConfig } from './components/PortfolioSidebarConfig';
+import { TradeLog } from './components/TradeLog';
+import { TradeLogSidebar } from './components/TradeLogSidebar';
+import { AssetAllocationMap } from './components/AssetAllocationMap';
 
 interface MA20Alert {
   ticker: string;
@@ -77,6 +82,9 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [activeTab, setActiveTab] = useState<'ma20' | 'vcp' | 'gmma'>('ma20');
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
+  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog'>('screener');
+  const [portfolioRefreshTrigger, setPortfolioRefreshTrigger] = useState<number>(0);
+  const [tradeLogRefreshTrigger, setTradeLogRefreshTrigger] = useState<number>(0);
 
   useEffect(() => {
     document.body.className = `${theme}-theme`;
@@ -465,8 +473,11 @@ function App() {
       <div className="app-layout-wrapper">
         
         {/* Collapsible Left Sidebar */}
-        <aside className="app-sidebar">
-          <div className="sidebar-top-header">
+        {showSidebar && (
+          <aside className="app-sidebar">
+            {dashboardMode === 'screener' ? (
+              <>
+                <div className="sidebar-top-header">
             <h2 className="sidebar-title">Screener Config</h2>
             <button className="sidebar-hide-btn" onClick={() => setShowSidebar(false)} title="Hide Panel">
               ◀ Hide
@@ -692,7 +703,30 @@ function App() {
               />
             )}
           </div>
+          </>
+          ) : dashboardMode === 'portfolio' ? (
+            <>
+              <div className="sidebar-top-header">
+                <h2 className="sidebar-title">Portfolio Config</h2>
+                <button className="sidebar-hide-btn" onClick={() => setShowSidebar(false)} title="Hide Panel">
+                  ◀ Hide
+                </button>
+              </div>
+              <div className="sidebar-content-scrollable" style={{ padding: '15px 0' }}>
+                <PortfolioSidebarConfig refreshDashboard={() => setPortfolioRefreshTrigger(prev => prev + 1)} />
+              </div>
+            </>
+          ) : (
+            <TradeLogSidebar
+              onTradeSaved={() => {
+                setTradeLogRefreshTrigger(prev => prev + 1);
+                setPortfolioRefreshTrigger(prev => prev + 1);
+              }}
+              onHide={() => setShowSidebar(false)}
+            />
+          )}
         </aside>
+      )}
 
         {/* Right Main Content Panel */}
         <div className="app-main-content">
@@ -738,7 +772,37 @@ function App() {
             </div>
           </header>
 
-          {/* Stats Summary Grid */}
+          {/* Main Dashboard Navigation Tabs */}
+          <div className="dashboard-navigation-tabs">
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'screener' ? 'active' : ''}`}
+              onClick={() => setDashboardMode('screener')}
+            >
+              🔍 Screener Dashboard
+            </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'portfolio' ? 'active' : ''}`}
+              onClick={() => setDashboardMode('portfolio')}
+            >
+              💼 Portfolio Monitoring
+            </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'assetmap' ? 'active' : ''}`}
+              onClick={() => setDashboardMode('assetmap')}
+            >
+              📊 Asset Map
+            </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'tradelog' ? 'active' : ''}`}
+              onClick={() => setDashboardMode('tradelog')}
+            >
+              📒 Trade Log
+            </button>
+          </div>
+
+          {dashboardMode === 'screener' ? (
+            <>
+              {/* Stats Summary Grid */}
           <div className="summary-grid">
             <div className="glass-panel card card-blue">
               <div className="card-title">Stocks Scanned</div>
@@ -1017,6 +1081,40 @@ function App() {
               )}
             </div>
           </div>
+          </>
+          ) : dashboardMode === 'portfolio' ? (
+            <PortfolioDashboard 
+              theme={theme}
+              refreshKey={portfolioRefreshTrigger}
+              onSelectTicker={(ticker) => {
+                const allAlerts = [
+                  ...results.ma20_alerts,
+                  ...results.vcp_alerts,
+                  ...(results.gmma_alerts ?? [])
+                ];
+                const matchingAlert = allAlerts.find(a => a.ticker === ticker);
+                if (matchingAlert) {
+                  const isMa20 = results.ma20_alerts.some(a => a.ticker === ticker);
+                  const isVcp = results.vcp_alerts.some(a => a.ticker === ticker);
+                  const isGmma = (results.gmma_alerts ?? []).some(a => a.ticker === ticker);
+                  if (isMa20) setActiveTab('ma20');
+                  else if (isVcp) setActiveTab('vcp');
+                  else if (isGmma) setActiveTab('gmma');
+                  handleSelectStock(ticker, matchingAlert);
+                } else {
+                  handleSelectStock(ticker, { ticker });
+                }
+              }}
+              onSwitchToScreener={() => setDashboardMode('screener')}
+            />
+          ) : dashboardMode === 'assetmap' ? (
+            <AssetAllocationMap refreshKey={portfolioRefreshTrigger} />
+          ) : (
+            <TradeLog
+              refreshKey={tradeLogRefreshTrigger}
+              onSwitchToPortfolio={() => setDashboardMode('portfolio')}
+            />
+          )}
         </div>
 
       </div>
