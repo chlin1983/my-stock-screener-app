@@ -10,7 +10,18 @@ import yfinance as yf
 import config
 import scanner
 
+# Configure Gemini AI if available
+try:
+    import google.generativeai as genai
+    HAS_GENAI = True
+    if config.GEMINI_API_KEY:
+        genai.configure(api_key=config.GEMINI_API_KEY)
+except ImportError:
+    HAS_GENAI = False
+    print("Warning: google-generativeai package not found. AI Chatbot will run in demo/mock mode.")
+
 app = FastAPI(title="Stock Screener API", description="Screener for MA20 Pullbacks, VCP Patterns and GMMA Strategy")
+
 
 # Enable CORS for frontend development
 app.add_middleware(
@@ -604,6 +615,156 @@ def delete_trade(trade_id: str):
         raise HTTPException(status_code=404, detail="Trade not found")
     _save_trades(trades)
     return {"status": "success", "message": "Trade deleted"}
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "model"
+    content: str
+
+class AIChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessage] = []
+
+@app.post("/ai/chat")
+def ai_chat(req: AIChatRequest):
+    # 1. Load portfolio holdings & trades
+    holdings_data = []
+    cash_balance = 15400.0
+    try:
+        if config.json_exists("portfolio_config.json"):
+            pcfg = config.read_json("portfolio_config.json")
+            holdings_data = pcfg.get("holdings", [])
+            cash_balance = pcfg.get("cash_balance", 15400.0)
+    except Exception as e:
+        print(f"Error loading portfolio config for AI: {e}")
+
+    trades_data = []
+    try:
+        if config.json_exists("trade_log.json"):
+            tlog = config.read_json("trade_log.json")
+            trades_data = tlog.get("trades", [])
+    except Exception as e:
+        print(f"Error loading trades log for AI: {e}")
+
+    # 2. Enrich holdings with latest price if available
+    try:
+        full_holdings = get_portfolio_holdings()
+        holdings_enriched = full_holdings.get("holdings", [])
+        summary = full_holdings.get("summary", {})
+        total_portfolio_value = summary.get("total_value", cash_balance)
+    except Exception:
+        holdings_enriched = holdings_data
+        total_portfolio_value = cash_balance + sum(h.get("qty", 0) * h.get("avg_cost", 0) for h in holdings_data)
+
+    # 3. Calculate portfolio concentration & risk flags
+    risk_flags = []
+    concentration_details = []
+    for h in holdings_enriched:
+        mv = h.get("market_value", h.get("qty", 0) * h.get("avg_cost", 0))
+        pct = (mv / total_portfolio_value) * 100 if total_portfolio_value > 0 else 0
+        concentration_details.append(f"- {h['ticker']}: {pct:.1f}% of portfolio")
+        if pct > 25:
+            risk_flags.append(f"High concentration risk in {h['ticker']} ({pct:.1f}% of portfolio). Consider diversifying.")
+        
+        # Check unrealized loss
+        gain_loss_pct = h.get("gain_loss_pct", 0.0)
+        if gain_loss_pct < -10:
+            risk_flags.append(f"{h['ticker']} is down {abs(gain_loss_pct):.1f}% from average cost. Monitor closely.")
+
+    # Sort trades to get 15 most recent
+    recent_trades = sorted(trades_data, key=lambda x: x.get("date", ""), reverse=True)[:15]
+    recent_trades_text = []
+    for t in recent_trades:
+        pnl_str = f", realized P&L: ${t['realized_pnl']}" if t.get("realized_pnl") is not None else ""
+        recent_trades_text.append(f"- {t.get('date')}: {t.get('type')} {t.get('shares')} {t.get('ticker')} @ ${t.get('price')}{pnl_str} (Notes: {t.get('notes')})")
+
+    # 4. Build System Instruction (System Prompt)
+    system_instruction = (
+        "You are 'Antigravity Advisor', an expert, highly conservative, risk-aware investment advisor built into the user's Stock Screener app. "
+        "Your goal is to guide the user toward high-probability, low-risk setups and actively prevent them from taking on excessive risk. "
+        "You have access to the user's live portfolio and trade history. Make your analysis highly personalized based on this data:\n\n"
+        f"--- USER PORTFOLIO SUMMARY ---\n"
+        f"Cash Balance: ${cash_balance:,.2f}\n"
+        f"Total Portfolio Value: ${total_portfolio_value:,.2f}\n"
+        "Current Holdings:\n"
+    )
+    for h in holdings_enriched:
+        cost = h.get("cost_basis", h.get("qty", 0) * h.get("avg_cost", 0))
+        mv = h.get("market_value", h.get("qty", 0) * h.get("avg_cost", 0))
+        pnl = h.get("gain_loss", mv - cost)
+        pnl_pct = h.get("gain_loss_pct", 0.0)
+        system_instruction += f"- {h['ticker']} ({h.get('name', '')}): {h.get('qty')} shares, Avg Cost: ${h.get('avg_cost'):.2f}, Current Price: ${h.get('current_price', h.get('avg_cost')):.2f}, Market Value: ${mv:,.2f}, Unrealized P&L: ${pnl:+,.2f} ({pnl_pct:+.2f}%)\n"
+    
+    system_instruction += "\nHoldings Concentration:\n" + ("\n".join(concentration_details) if concentration_details else "No holdings active.") + "\n"
+    
+    system_instruction += "\nRecent Trade Log History (newest first):\n"
+    if recent_trades_text:
+        system_instruction += "\n".join(recent_trades_text) + "\n"
+    else:
+        system_instruction += "No trades logged yet.\n"
+        
+    system_instruction += (
+        "\n--- INVESTMENT ADVICE RULES ---\n"
+        "1. Capital Preservation First: Always emphasize keeping losses small (e.g., using 7-8% stop losses) and avoiding high-risk, speculative bets.\n"
+        "2. Analyze Exposure: If the user wants to buy something, evaluate their current exposure. If a single stock is already > 25% of their portfolio, advise against adding to it.\n"
+        "3. Technical Alignment: Recommend entering positions only when there is technical alignment, such as VCP contracting patterns (Mark Minervini's Stage 2 Trend Template) or MA20 support pullbacks.\n"
+        "4. Risk Flags: If you detect high concentration, large unrealized losses, or excessive buying of speculative stocks, highlight these risks explicitly.\n"
+        "5. Tone: Be professional, objective, encouraging but realistic, and highly protective of their capital.\n"
+        "6. Formatting: Use clear headers, bullet points, and highlight key takeaways. Keep responses concise and structured.\n"
+        "7. Disclaimer: Include a disclaimer that this is educational advice and not official financial planning.\n"
+    )
+
+    # 5. Check if API key exists or HAS_GENAI is false
+    if not HAS_GENAI or not config.GEMINI_API_KEY:
+        # Fallback Demo Response Mode
+        demo_reply = (
+            "⚠️ **Gemini API Key Missing or Package Issue**\n\n"
+            "To activate my full AI capabilities, please set your `GEMINI_API_KEY` in the backend `.env.local` file.\n\n"
+            "Here is a mock risk assessment based on your current portfolio:\n"
+        )
+        if risk_flags:
+            demo_reply += "\n### 🚨 Portfolio Risk Warnings Detected:\n"
+            for rf in risk_flags:
+                demo_reply += f"- **{rf}**\n"
+        else:
+            demo_reply += "\nNo severe risk warnings detected. Portfolio allocations look reasonable!\n"
+            
+        demo_reply += f"\n### 📊 Portfolio Assessment:\n"
+        demo_reply += f"- **Cash Reserves:** ${cash_balance:,.2f} (which provides good liquidity for future setups).\n"
+        demo_reply += f"- **Active Exposure:** You have {len(holdings_enriched)} active holdings. "
+        if len(holdings_enriched) > 0:
+            demo_reply += "Your holdings are " + ", ".join([h['ticker'] for h in holdings_enriched]) + "."
+        else:
+            demo_reply += "No holdings active right now."
+            
+        demo_reply += (
+            "\n\n*Get an API key for free at [Google AI Studio](https://aistudio.google.com/app/apikey) and insert it in `backend/.env.local` to start chatting with me!*"
+        )
+        return {"reply": demo_reply, "risk_flags": risk_flags}
+
+    # Call Gemini API
+    try:
+        model = genai.GenerativeModel('gemini-3.5-flash', system_instruction=system_instruction)
+        
+        gemini_history = []
+        for msg in req.history:
+            role = "user" if msg.role == "user" else "model"
+            gemini_history.append({
+                "role": role,
+                "parts": [msg.content]
+            })
+            
+        chat = model.start_chat(history=gemini_history)
+        response = chat.send_message(req.message)
+        
+        return {
+            "reply": response.text,
+            "risk_flags": risk_flags
+        }
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI Chatbot Error: {str(e)}")
+
+
 
 if __name__ == "__main__":
 
