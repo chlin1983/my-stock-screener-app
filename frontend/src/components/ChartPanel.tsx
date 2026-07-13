@@ -46,6 +46,8 @@ const GMMA_LONG_COLORS = [
 const GMMA_SHORT_PERIODS = [3, 5, 8, 10, 12, 15];
 const GMMA_LONG_PERIODS = [30, 35, 40, 45, 50, 60];
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
+
 export const ChartPanel: React.FC<ChartPanelProps> = ({
   ticker,
   candles,
@@ -62,11 +64,41 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   const [showMA150, setShowMA150] = useState<boolean>(true);
   const [showMA200, setShowMA200] = useState<boolean>(true);
 
-  // Color Pickers state (persistent with localStorage)
+  // Color Pickers state (persistent with localStorage & backend GCS settings)
   const [ma20Color, setMa20Color] = useState<string>(() => localStorage.getItem('ma20Color') || '#eab308');
   const [ma50Color, setMa50Color] = useState<string>(() => localStorage.getItem('ma50Color') || '#3b82f6');
   const [ma150Color, setMa150Color] = useState<string>(() => localStorage.getItem('ma150Color') || '#f97316');
   const [ma200Color, setMa200Color] = useState<string>(() => localStorage.getItem('ma200Color') || '#ec4899');
+
+  // Load custom settings from backend on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/user-settings`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.ma20Color) {
+          setMa20Color(data.ma20Color);
+          localStorage.setItem('ma20Color', data.ma20Color);
+        }
+        if (data.ma50Color) {
+          setMa50Color(data.ma50Color);
+          localStorage.setItem('ma50Color', data.ma50Color);
+        }
+        if (data.ma150Color) {
+          setMa150Color(data.ma150Color);
+          localStorage.setItem('ma150Color', data.ma150Color);
+        }
+        if (data.ma200Color) {
+          setMa200Color(data.ma200Color);
+          localStorage.setItem('ma200Color', data.ma200Color);
+        }
+      } catch (e) {
+        console.error("Failed to load user settings from backend:", e);
+      }
+    };
+    loadSettings();
+  }, []);
 
   // Sync showGMMA and disable MAs when gmmaData prop changes (e.g. switching tabs)
   useEffect(() => {
@@ -85,12 +117,24 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     }
   }, [gmmaData?.showByDefault]);
 
-  const handleColorChange = (ma: 'MA20' | 'MA50' | 'MA150' | 'MA200', color: string) => {
+  const handleColorChange = async (ma: 'MA20' | 'MA50' | 'MA150' | 'MA200', color: string) => {
     localStorage.setItem(`${ma.toLowerCase()}Color`, color);
     if (ma === 'MA20') setMa20Color(color);
     else if (ma === 'MA50') setMa50Color(color);
     else if (ma === 'MA150') setMa150Color(color);
     else if (ma === 'MA200') setMa200Color(color);
+
+    try {
+      await fetch(`${BACKEND_URL}/user-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [`${ma.toLowerCase()}Color`]: color
+        })
+      });
+    } catch (e) {
+      console.error("Failed to save color change to backend:", e);
+    }
   };
 
   // Helper to calculate Simple Moving Average (SMA)

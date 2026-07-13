@@ -506,6 +506,25 @@ tr.selected td {
   background-color: rgba(99, 102, 241, 0.1) !important;
 }
 
+.ticker-cell {
+  max-width: 100px;
+  overflow: hidden;
+}
+
+.ticker-symbol {
+  font-weight: 700;
+  color: var(--color-text-main);
+}
+
+.ticker-name {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
 .alert-badge {
   display: inline-flex;
   align-items: center;
@@ -566,6 +585,27 @@ tr.selected td {
 /* Chart Panel container */
 .chart-panel-container {
   margin-top: 10px;
+  min-height: 540px;
+}
+
+.chart-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(11, 12, 16, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--border-radius-lg);
+}
+
+.light-theme .chart-loading-overlay {
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .chart-panel {
@@ -840,11 +880,20 @@ tr.selected td {
   background: rgba(0, 0, 255, 0.04);
 }
 
+.gmma-detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
 .gmma-detail-header {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 .gmma-detail-ticker {
@@ -862,7 +911,7 @@ tr.selected td {
   display: flex;
   gap: 24px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .gmma-detail-item {

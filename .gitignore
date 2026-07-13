@@ -11,6 +11,12 @@ backend/.venv/
 backend/env/
 backend/venv/
 
+# Local environment config (contains GCS credentials — NEVER commit)
+backend/.env.local
+backend/*-service-account*.json
+backend/*.json.key
+*service-account-key*.json
+
 # Python artifacts
 *.py[cod]
 *$py.class

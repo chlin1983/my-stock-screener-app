@@ -113,18 +113,40 @@ def get_scan_status():
     return scan_status
 
 @app.get("/scan/latest")
-def get_latest_scan():
-    if not config.json_exists("scan_results.json"):
-        return {
-            "timestamp": None,
-            "universe": None,
-            "scanned_count": 0,
-            "ma20_alerts": [],
-            "vcp_alerts": [],
-            "message": "No scan has been performed yet."
-        }
+def get_latest_scan(universe: Optional[str] = None):
+    filename = "scan_results.json"
+    if universe:
+        universe_clean = "custom" if universe == "watchlist" else universe.lower()
+        filename = f"scan_results_{universe_clean}.json"
+
+    if not config.json_exists(filename):
+        # Fall back to default scan_results.json if it exists and matches the universe
+        if filename != "scan_results.json" and config.json_exists("scan_results.json"):
+            fallback_data = config.read_json("scan_results.json")
+            fallback_univ = fallback_data.get("universe", "").lower()
+            target_univ = "custom" if universe == "watchlist" else universe.lower()
+            if fallback_univ == target_univ or (fallback_univ == "watchlist" and target_univ == "custom"):
+                filename = "scan_results.json"
+            else:
+                return {
+                    "timestamp": None,
+                    "universe": universe,
+                    "scanned_count": 0,
+                    "ma20_alerts": [],
+                    "vcp_alerts": [],
+                    "message": f"No scan has been performed for {universe} yet."
+                }
+        else:
+            return {
+                "timestamp": None,
+                "universe": universe,
+                "scanned_count": 0,
+                "ma20_alerts": [],
+                "vcp_alerts": [],
+                "message": "No scan has been performed yet."
+            }
     try:
-        data = config.read_json("scan_results.json")
+        data = config.read_json(filename)
             
         # Check if we need to enrich with company names
         needs_enrichment = False
@@ -144,7 +166,7 @@ def get_latest_scan():
                     break
                     
         if needs_enrichment:
-            print("Enriching latest scan results with company names...")
+            print(f"Enriching {filename} scan results with company names...")
             ma20_alerts = data.get("ma20_alerts", [])
             vcp_alerts = data.get("vcp_alerts", [])
             gmma_alerts = data.get("gmma_alerts", [])
@@ -172,7 +194,7 @@ def get_latest_scan():
                     a["name"] = ticker_names.get(a["ticker"], a["ticker"])
                     
             # Save enriched results back to file
-            config.write_json("scan_results.json", data, indent=2)
+            config.write_json(filename, data, indent=2)
                 
         # Ensure gmma_alerts key always exists for older cached results
         if "gmma_alerts" not in data:
@@ -238,6 +260,47 @@ def get_stock_history(ticker: str):
         return hist_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch stock history: {str(e)}")
+
+class UserSettings(BaseModel):
+    ma20Color: Optional[str] = None
+    ma50Color: Optional[str] = None
+    ma150Color: Optional[str] = None
+    ma200Color: Optional[str] = None
+
+@app.get("/user-settings")
+def get_user_settings():
+    cache_key = "user_settings.json"
+    if config.json_exists(cache_key):
+        try:
+            return config.read_json(cache_key)
+        except Exception as e:
+            print(f"Error reading user settings: {e}")
+    return {
+        "ma20Color": "#eab308",
+        "ma50Color": "#3b82f6",
+        "ma150Color": "#f97316",
+        "ma200Color": "#ec4899"
+    }
+
+@app.post("/user-settings")
+def save_user_settings(settings: UserSettings):
+    cache_key = "user_settings.json"
+    try:
+        current = {}
+        if config.json_exists(cache_key):
+            try:
+                current = config.read_json(cache_key)
+            except Exception:
+                pass
+        
+        # Merge new changes
+        data_dict = settings.model_dump(exclude_unset=True) if hasattr(settings, 'model_dump') else settings.dict(exclude_unset=True)
+        current.update(data_dict)
+        
+        config.write_json(cache_key, current)
+        return {"status": "success", "settings": current}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save user settings: {str(e)}")
 
 @app.get("/config")
 def get_current_config():
