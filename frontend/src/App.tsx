@@ -6,8 +6,10 @@ import { PortfolioSidebarConfig } from './components/PortfolioSidebarConfig';
 import { TradeLog } from './components/TradeLog';
 import { TradeLogSidebar } from './components/TradeLogSidebar';
 import { AssetAllocationMap } from './components/AssetAllocationMap';
+import { AIChatbot } from './components/AIChatbot';
 
 interface MA20Alert {
+
   ticker: string;
   name?: string;
   close: number;
@@ -82,7 +84,7 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [activeTab, setActiveTab] = useState<'ma20' | 'vcp' | 'gmma'>('ma20');
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
-  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog'>('screener');
+  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot'>('screener');
   const [portfolioRefreshTrigger, setPortfolioRefreshTrigger] = useState<number>(0);
   const [tradeLogRefreshTrigger, setTradeLogRefreshTrigger] = useState<number>(0);
 
@@ -798,6 +800,15 @@ function App() {
             >
               📒 Trade Log
             </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'chatbot' ? 'active' : ''}`}
+              onClick={() => {
+                setDashboardMode('chatbot');
+                setShowSidebar(false);
+              }}
+            >
+              🤖 AI Advisor
+            </button>
           </div>
 
           {dashboardMode === 'screener' ? (
@@ -1109,11 +1120,13 @@ function App() {
             />
           ) : dashboardMode === 'assetmap' ? (
             <AssetAllocationMap refreshKey={portfolioRefreshTrigger} />
-          ) : (
+          ) : dashboardMode === 'tradelog' ? (
             <TradeLog
               refreshKey={tradeLogRefreshTrigger}
               onSwitchToPortfolio={() => setDashboardMode('portfolio')}
             />
+          ) : (
+            <AIChatbot theme={theme} />
           )}
         </div>
 

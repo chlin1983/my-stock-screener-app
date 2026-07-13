@@ -4,9 +4,20 @@ import json
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Load environment variables from .env.local (if it exists)
+ENV_FILE = os.path.join(BASE_DIR, ".env.local")
+if os.path.exists(ENV_FILE):
+    with open(ENV_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+
 # Check storage environment configuration
 STORAGE_TYPE = os.environ.get("STORAGE_TYPE", "local").lower()  # 'local' or 'gcs'
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Local cache paths
 LOCAL_CACHE_DIR = os.path.join(BASE_DIR, "cache")
