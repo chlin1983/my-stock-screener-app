@@ -26,10 +26,11 @@ interface NewsPanelProps {
 }
 
 export function NewsPanel({ theme: _theme }: NewsPanelProps) {
-  const [activeCategory, setActiveCategory] = useState<'global' | 'shares' | 'ai'>('global');
+  const [activeCategory, setActiveCategory] = useState<'global' | 'shares' | 'ai' | 'favorites'>('global');
   const [articles, setArticles] = useState<NewsItem[]>([]);
   const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<ArticleDetail | null>(null);
+  const [favorites, setFavorites] = useState<NewsItem[]>([]);
   
   const [loadingList, setLoadingList] = useState<boolean>(true);
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false);
@@ -41,19 +42,41 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
 
   const BACKEND_URL = (window as any).__env__?.VITE_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
-  const fetchNewsList = useCallback(async (cat: 'global' | 'shares' | 'ai', noChina: boolean = false) => {
+  const fetchFavorites = useCallback(async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/news/favorites`);
+      if (!response.ok) throw new Error('Failed to load favorites');
+      const data = await response.json();
+      setFavorites(data);
+    } catch (err) {
+      console.error('Error fetching favorites:', err);
+    }
+  }, [BACKEND_URL]);
+
+  const fetchNewsList = useCallback(async (cat: 'global' | 'shares' | 'ai' | 'favorites', noChina: boolean = false) => {
     setLoadingList(true);
     setErrorList(null);
     try {
-      const response = await fetch(`${BACKEND_URL}/news/list?category=${cat}&exclude_china=${noChina}`);
-      if (!response.ok) {
-        throw new Error('Failed to load articles from the server.');
-      }
-      const data = await response.json();
-      setArticles(data);
-      if (data.length > 0 && !selectedArticleId) {
-        // Auto-select first article on initial load
-        setSelectedArticleId(data[0].id);
+      if (cat === 'favorites') {
+        const response = await fetch(`${BACKEND_URL}/news/favorites`);
+        if (!response.ok) {
+          throw new Error('Failed to load favorite articles.');
+        }
+        const data = await response.json();
+        setArticles(data);
+        if (data.length > 0 && !selectedArticleId) {
+          setSelectedArticleId(data[0].id);
+        }
+      } else {
+        const response = await fetch(`${BACKEND_URL}/news/list?category=${cat}&exclude_china=${noChina}`);
+        if (!response.ok) {
+          throw new Error('Failed to load articles from the server.');
+        }
+        const data = await response.json();
+        setArticles(data);
+        if (data.length > 0 && !selectedArticleId) {
+          setSelectedArticleId(data[0].id);
+        }
       }
     } catch (err: any) {
       console.error(err);
@@ -64,22 +87,92 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
   }, [BACKEND_URL, selectedArticleId]);
 
   const fetchArticleDetail = useCallback(async (id: number) => {
+    // 1. Check if the article is already fully loaded locally (e.g. from Favorites tab)
+    const localMatch = articles.find(a => a.id === id) as any;
+    if (localMatch && localMatch.content) {
+      setSelectedArticle(localMatch);
+      return;
+    }
+
+    // 2. Check in our loaded favorites list
+    const favMatch = favorites.find(a => a.id === id) as any;
+    if (favMatch && favMatch.content) {
+      setSelectedArticle(favMatch);
+      return;
+    }
+
     setLoadingDetail(true);
     setErrorDetail(null);
     try {
       const response = await fetch(`${BACKEND_URL}/news/article/${id}`);
       if (!response.ok) {
+        // Fallback: search in loaded favorites
+        if (favMatch) {
+          setSelectedArticle(favMatch);
+          return;
+        }
         throw new Error('Failed to fetch article details.');
       }
       const data = await response.json();
       setSelectedArticle(data);
     } catch (err: any) {
       console.error(err);
-      setErrorDetail(err.message || 'Error loading article content.');
+      // Fallback: search in loaded favorites
+      if (favMatch) {
+        setSelectedArticle(favMatch);
+      } else {
+        setErrorDetail(err.message || 'Error loading article content.');
+      }
     } finally {
       setLoadingDetail(false);
     }
-  }, [BACKEND_URL]);
+  }, [BACKEND_URL, articles, favorites]);
+
+  const toggleFavorite = async (article: ArticleDetail) => {
+    if (!article) return;
+    const isFav = favorites.some(fav => fav.id === article.id);
+    
+    try {
+      if (isFav) {
+        const response = await fetch(`${BACKEND_URL}/news/favorites/${article.id}`, {
+          method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Failed to remove favorite');
+        
+        setFavorites(prev => prev.filter(fav => fav.id !== article.id));
+        
+        if (activeCategory === 'favorites') {
+          const updatedArticles = articles.filter(a => a.id !== article.id);
+          setArticles(updatedArticles);
+          if (updatedArticles.length > 0) {
+            setSelectedArticleId(updatedArticles[0].id);
+          } else {
+            setSelectedArticleId(null);
+            setSelectedArticle(null);
+          }
+        }
+      } else {
+        const response = await fetch(`${BACKEND_URL}/news/favorites`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(article)
+        });
+        if (!response.ok) throw new Error('Failed to save favorite');
+        
+        const result = await response.json();
+        setFavorites(prev => [...prev, result.article]);
+      }
+    } catch (err) {
+      console.error('Error toggling favorite:', err);
+    }
+  };
+
+  // Load favorites list on component mount
+  useEffect(() => {
+    fetchFavorites();
+  }, [fetchFavorites]);
 
   // Load list when category OR excludeChina changes
   useEffect(() => {
@@ -169,6 +262,16 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
             }}
           >
             🤖 硬核 AI
+          </button>
+          <button 
+            className={`news-cat-tab ${activeCategory === 'favorites' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveCategory('favorites');
+              setSelectedArticleId(null);
+              setSelectedArticle(null);
+            }}
+          >
+            ⭐ 收藏夹
           </button>
         </div>
 
@@ -306,6 +409,13 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
                     >
                       🔗 阅读原文
                     </a>
+                    <button 
+                      onClick={() => toggleFavorite(selectedArticle)}
+                      className={`btn-favorite-toggle ${favorites.some(f => f.id === selectedArticle.id) ? 'active' : ''}`}
+                      title={favorites.some(f => f.id === selectedArticle.id) ? 'Remove from Favorites' : 'Save to Favorites'}
+                    >
+                      {favorites.some(f => f.id === selectedArticle.id) ? '⭐ 已收藏' : '☆ 收藏'}
+                    </button>
                   </div>
                 </header>
 

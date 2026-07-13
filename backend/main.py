@@ -43,6 +43,16 @@ scan_status = {
     "error": None
 }
 
+class FavoriteArticle(BaseModel):
+    id: int
+    title: str
+    content: Optional[str] = None
+    summary: Optional[str] = None
+    author: Optional[str] = None
+    published_at: Optional[int] = None
+    image_url: Optional[str] = None
+    url: Optional[str] = None
+
 class ScanRequest(BaseModel):
     universe: str  # 'dow30', 'nasdaq100', 'nasdaq', 'nyse', 'amex', 'sp500', 'custom'
     custom_tickers: Optional[List[str]] = None
@@ -490,6 +500,19 @@ def _load_trades() -> list:
 def _save_trades(trades: list) -> None:
     config.write_json(TRADE_LOG_KEY, {"trades": trades})
 
+# Favorite Articles Database Helpers
+FAVORITES_KEY = "favorite_articles.json"
+
+def _load_favorites() -> list:
+    """Load all favorite articles from JSON store, initialize if missing."""
+    if not config.json_exists(FAVORITES_KEY):
+        config.write_json(FAVORITES_KEY, {"favorites": []})
+    data = config.read_json(FAVORITES_KEY)
+    return data.get("favorites", [])
+
+def _save_favorites(favorites: list) -> None:
+    config.write_json(FAVORITES_KEY, {"favorites": favorites})
+
 def _sync_portfolio_buy(ticker: str, shares: int, price: float, name: str) -> None:
     """Add/update a holding in portfolio_config.json after a BUY."""
     PCFG = "portfolio_config.json"
@@ -618,6 +641,42 @@ def delete_trade(trade_id: str):
         raise HTTPException(status_code=404, detail="Trade not found")
     _save_trades(trades)
     return {"status": "success", "message": "Trade deleted"}
+
+# -----------------------------------------------------------------------
+# Favorite Articles Endpoints
+# -----------------------------------------------------------------------
+
+@app.get("/news/favorites")
+def get_favorites():
+    return _load_favorites()
+
+@app.post("/news/favorites")
+def add_favorite(article: FavoriteArticle):
+    favorites = _load_favorites()
+    
+    # Check if already exists, update if exists, otherwise append
+    exists = False
+    for i, fav in enumerate(favorites):
+        if fav.get("id") == article.id:
+            favorites[i] = article.dict()
+            exists = True
+            break
+            
+    if not exists:
+        favorites.append(article.dict())
+        
+    _save_favorites(favorites)
+    return {"status": "success", "article": article}
+
+@app.delete("/news/favorites/{article_id}")
+def delete_favorite(article_id: int):
+    favorites = _load_favorites()
+    original_len = len(favorites)
+    favorites = [fav for fav in favorites if fav.get("id") != article_id]
+    if len(favorites) == original_len:
+        raise HTTPException(status_code=404, detail="Favorite article not found")
+    _save_favorites(favorites)
+    return {"status": "success", "message": "Article removed from favorites"}
 
 class ChatMessage(BaseModel):
     role: str  # "user" or "model"
