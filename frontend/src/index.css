@@ -2017,7 +2017,7 @@ kbd {
 .dashboard-navigation-tabs {
   display: flex;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   border-bottom: 1px solid var(--glass-border);
   padding-bottom: 8px;
 }
@@ -2289,9 +2289,9 @@ kbd {
 .news-panel-layout {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  height: calc(100vh - 120px);
-  padding: 10px 0;
+  gap: 16px;
+  height: auto;
+  padding: 0 0 10px 0;
   box-sizing: border-box;
 }
 
@@ -2451,7 +2451,7 @@ kbd {
   gap: 20px;
   flex-grow: 1;
   min-height: 0; /* Important for scroll */
-  height: calc(100% - 70px);
+  height: auto;
 }
 
 .news-list-column {
@@ -2461,7 +2461,9 @@ kbd {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  height: 100%;
+  height: calc(100vh - 32px);
+  position: sticky;
+  top: 16px;
 }
 
 .news-scroll-container {
@@ -2561,16 +2563,16 @@ kbd {
 .news-reader-column {
   flex-grow: 1;
   border-radius: var(--border-radius-md);
-  overflow: hidden;
-  height: 100%;
+  overflow: visible;
+  height: auto;
   display: flex;
   flex-direction: column;
 }
 
 .article-reader-scroll {
-  overflow-y: auto;
+  overflow-y: visible;
   padding: 30px;
-  height: 100%;
+  height: auto;
   box-sizing: border-box;
 }
 
@@ -2580,6 +2582,10 @@ kbd {
 }
 
 .article-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
   border-bottom: 1px solid var(--glass-border);
   padding-bottom: 20px;
   margin-bottom: 25px;
@@ -2773,5 +2779,40 @@ kbd {
   100% {
     opacity: 0.6;
   }
+}
+
+/* Favorite Toggle Button styling */
+.btn-favorite-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  color: var(--color-text-muted);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  outline: none;
+}
+
+.btn-favorite-toggle:hover {
+  background: var(--glass-highlight);
+  border-color: var(--accent-primary);
+  color: var(--color-text-main);
+  transform: translateY(-1px);
+}
+
+.btn-favorite-toggle.active {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.btn-favorite-toggle.active:hover {
+  background: rgba(245, 158, 11, 0.18);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.25);
 }
 
