@@ -137,7 +137,9 @@ function App() {
     return localStorage.getItem('ag_watchlist_active') || 'semiconductor';
   });
 
-  const [universeMode, setUniverseMode] = useState<'all_usa' | 'watchlist'>('watchlist');
+  const [universeMode, setUniverseMode] = useState<
+    'watchlist' | 'dow30' | 'nasdaq100' | 'sp500' | 'nasdaq' | 'nyse' | 'amex' | 'all_usa'
+  >('nasdaq100');
 
   const activeWatchlist = watchlists.find(w => w.id === activeWatchlistId) ?? watchlists[0];
 
@@ -181,9 +183,10 @@ function App() {
   };
 
   // Fetch latest scan results
-  const fetchLatestResults = async () => {
+  const fetchLatestResults = async (universe?: string) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/scan/latest`);
+      const target = universe || universeMode;
+      const res = await fetch(`${BACKEND_URL}/scan/latest?universe=${target}`);
       const data = await res.json();
       if (data && !data.message) {
         setResults(data);
@@ -191,10 +194,24 @@ function App() {
         // Auto select first stock in current tab if exists
         const alertsList = activeTab === 'ma20' ? data.ma20_alerts :
                            activeTab === 'vcp'  ? data.vcp_alerts  :
-                                                  data.gmma_alerts;
+                                                  (data.gmma_alerts ?? []);
         if (alertsList.length > 0) {
           handleSelectStock(alertsList[0].ticker, alertsList[0]);
         }
+      } else {
+        // Clear results if no scan done for this universe
+        setResults({
+          timestamp: null,
+          universe: target,
+          scanned_count: 0,
+          ma20_alerts: [],
+          vcp_alerts: [],
+          gmma_alerts: [],
+          message: data.message || `No scan results found for ${target}`
+        });
+        setSelectedTicker('');
+        setHistory([]);
+        setSelectedAlertDetails(null);
       }
     } catch (e) {
       console.error("Error fetching latest results:", e);
@@ -204,7 +221,7 @@ function App() {
   // Run initial loads
   useEffect(() => {
     fetchStatus();
-    fetchLatestResults();
+    fetchLatestResults(universeMode);
   }, []);
 
   // Update tab toggle behavior
@@ -259,13 +276,29 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTab, results, selectedTicker]);
 
-  // Auto-scroll selected row into view
+  // Auto-scroll selected row into view (only inside the scrollable table container, to prevent window jump)
   useEffect(() => {
     if (!selectedTicker) return;
     const timer = setTimeout(() => {
-      const selectedRow = document.querySelector('.table-wrapper tr.selected');
-      if (selectedRow) {
-        selectedRow.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+      const container = document.querySelector('.table-wrapper') as HTMLElement;
+      const selectedRow = document.querySelector('.table-wrapper tr.selected') as HTMLElement;
+      if (container && selectedRow) {
+        const containerTop = container.scrollTop;
+        const containerHeight = container.clientHeight;
+        const containerBottom = containerTop + containerHeight;
+
+        const rowTop = selectedRow.offsetTop;
+        const rowHeight = selectedRow.offsetHeight;
+        const rowBottom = rowTop + rowHeight;
+
+        // If row is above container viewport, scroll up to rowTop
+        if (rowTop < containerTop) {
+          container.scrollTop = rowTop;
+        }
+        // If row is below container viewport, scroll down so row is fully visible at bottom
+        else if (rowBottom > containerBottom) {
+          container.scrollTop = rowBottom - containerHeight;
+        }
       }
     }, 40);
     return () => clearTimeout(timer);
@@ -280,7 +313,7 @@ function App() {
         if (curStatus && !curStatus.is_running) {
           // Scan just completed
           clearInterval(interval);
-          fetchLatestResults();
+          fetchLatestResults(universeMode);
         }
       }, 2000);
     }
@@ -317,17 +350,17 @@ function App() {
   const handleRunScan = async () => {
     let payload: Record<string, any>;
 
-    if (universeMode === 'all_usa') {
-      // Scan the full US market (NASDAQ + NYSE + AMEX)
-      payload = {
-        universe: 'all_usa',
-        custom_tickers: null,
-      };
-    } else {
+    if (universeMode === 'watchlist') {
       // Scan the active custom watchlist
       payload = {
         universe: 'custom',
         custom_tickers: activeWatchlist?.tickers && activeWatchlist.tickers.length > 0 ? activeWatchlist.tickers : null,
+      };
+    } else {
+      // Scan standard universe
+      payload = {
+        universe: universeMode,
+        custom_tickers: null,
       };
     }
 
@@ -356,7 +389,7 @@ function App() {
       setStatus({
         is_running: true,
         last_completed: status.last_completed,
-        current_universe: universeMode === 'all_usa' ? 'All USA' : 'Watchlist',
+        current_universe: universeMode === 'watchlist' ? (activeWatchlist?.name || 'Watchlist') : universeMode.toUpperCase(),
         error: null
       });
 
@@ -474,21 +507,25 @@ function App() {
                 {/* Section 1: Universe Selection */}
                 <div className="sidebar-section">
                   <h3 className="section-title">Universe Selection</h3>
-                  <div className="universe-mode-selector">
-                    <button
-                      id="mode-watchlist"
-                      className={`mode-pill ${universeMode === 'watchlist' ? 'active' : ''}`}
-                      onClick={() => setUniverseMode('watchlist')}
+                  <div className="form-group">
+                    <label style={{ marginBottom: '4px' }}>Select Universe</label>
+                    <select
+                      value={universeMode}
+                      onChange={(e) => {
+                        const newMode = e.target.value as any;
+                        setUniverseMode(newMode);
+                        fetchLatestResults(newMode);
+                      }}
                     >
-                      <span className="mode-pill-icon">📋</span> Watchlists
-                    </button>
-                    <button
-                      id="mode-all-usa"
-                      className={`mode-pill ${universeMode === 'all_usa' ? 'active' : ''}`}
-                      onClick={() => setUniverseMode('all_usa')}
-                    >
-                      <span className="mode-pill-icon">🇺🇸</span> All USA
-                    </button>
+                      <option value="watchlist">📋 Custom Watchlist</option>
+                      <option value="dow30">🇺🇸 Dow Jones 30</option>
+                      <option value="nasdaq100">🇺🇸 Nasdaq 100</option>
+                      <option value="sp500">🇺🇸 S&P 500</option>
+                      <option value="nasdaq">🇺🇸 Full NASDAQ Exchange</option>
+                      <option value="nyse">🇺🇸 Full NYSE Exchange</option>
+                      <option value="amex">🇺🇸 AMEX Exchange</option>
+                      <option value="all_usa">🇺🇸 All USA (NASDAQ+NYSE+AMEX)</option>
+                    </select>
                   </div>
 
                   {universeMode === 'watchlist' ? (
@@ -516,9 +553,23 @@ function App() {
                     </div>
                   ) : (
                     <div className="all-usa-info">
-                      <div className="all-usa-badge">NASDAQ + NYSE + AMEX</div>
+                      <div className="all-usa-badge">
+                        {universeMode === 'dow30' && 'Dow Jones 30 (~30 stocks)'}
+                        {universeMode === 'nasdaq100' && 'Nasdaq 100 (~100 stocks)'}
+                        {universeMode === 'sp500' && 'S&P 500 (~500 stocks)'}
+                        {universeMode === 'nasdaq' && 'NASDAQ Exchange (~4,000 stocks)'}
+                        {universeMode === 'nyse' && 'NYSE Exchange (~2,500 stocks)'}
+                        {universeMode === 'amex' && 'AMEX Exchange (~500 stocks)'}
+                        {universeMode === 'all_usa' && 'NASDAQ + NYSE + AMEX (~8,000 stocks)'}
+                      </div>
                       <p className="all-usa-desc">
-                        Scans the entire US market (~10k stocks). Can take 20–40 min.
+                        {universeMode === 'dow30' && 'Very fast scan (~30 seconds).'}
+                        {universeMode === 'nasdaq100' && 'Fast scan (~1-2 minutes).'}
+                        {universeMode === 'sp500' && 'Moderate scan (~3-5 minutes).'}
+                        {universeMode === 'nasdaq' && 'Slow scan (~10-15 minutes).'}
+                        {universeMode === 'nyse' && 'Slow scan (~8-12 minutes).'}
+                        {universeMode === 'amex' && 'Moderate scan (~2-3 minutes).'}
+                        {universeMode === 'all_usa' && 'Very slow scan (~20-40 minutes on first run).'}
                       </p>
                     </div>
                   )}
@@ -879,36 +930,38 @@ function App() {
                   {/* GMMA Detail Card — only shown when selectedAlertDetails is a real GMMA alert */}
                   {activeTab === 'gmma' && selectedAlertDetails && 'short_ema_values' in selectedAlertDetails && (
                     <div className="glass-panel gmma-detail-card">
-                      <div className="gmma-detail-header">
-                        <span className="gmma-detail-ticker">{selectedAlertDetails.ticker}</span>
-                        <span className="gmma-detail-name">{selectedAlertDetails.name}</span>
-                      </div>
-                      <div className="gmma-detail-row">
-                        <div className="gmma-detail-item">
-                          <span className="gmma-detail-label">Alignment</span>
-                          <span className={`gmma-detail-value ${selectedAlertDetails.is_bullish_aligned ? 'metric-positive' : 'metric-negative'}`}>
-                            {selectedAlertDetails.is_bullish_aligned ? '▲ Bullish' : '▼ Bearish'}
-                          </span>
+                      <div className="gmma-detail-top-row">
+                        <div className="gmma-detail-header">
+                          <span className="gmma-detail-ticker">{selectedAlertDetails.ticker}</span>
+                          <span className="gmma-detail-name">{selectedAlertDetails.name}</span>
                         </div>
-                        <div className="gmma-detail-item">
-                          <span className="gmma-detail-label">Crossover</span>
-                          <span className="gmma-detail-value" style={{ color: '#0000FF' }}>
-                            {selectedAlertDetails.had_recent_crossover
-                              ? `${selectedAlertDetails.crossover_days_ago}d ago`
-                              : '—'}
-                          </span>
-                        </div>
-                        <div className="gmma-detail-item">
-                          <span className="gmma-detail-label">Group Sep.</span>
-                          <span className="gmma-detail-value metric-positive">
-                            {selectedAlertDetails.separation_pct?.toFixed(2) ?? '—'}%
-                          </span>
-                        </div>
-                        <div className="gmma-detail-item">
-                          <span className="gmma-detail-label">Volume</span>
-                          <span className="gmma-detail-value">
-                            {formatNumber(selectedAlertDetails.volume)}
-                          </span>
+                        <div className="gmma-detail-row">
+                          <div className="gmma-detail-item">
+                            <span className="gmma-detail-label">Alignment</span>
+                            <span className={`gmma-detail-value ${selectedAlertDetails.is_bullish_aligned ? 'metric-positive' : 'metric-negative'}`}>
+                              {selectedAlertDetails.is_bullish_aligned ? '▲ Bullish' : '▼ Bearish'}
+                            </span>
+                          </div>
+                          <div className="gmma-detail-item">
+                            <span className="gmma-detail-label">Crossover</span>
+                            <span className="gmma-detail-value" style={{ color: '#0000FF' }}>
+                              {selectedAlertDetails.had_recent_crossover
+                                ? `${selectedAlertDetails.crossover_days_ago}d ago`
+                                : '—'}
+                            </span>
+                          </div>
+                          <div className="gmma-detail-item">
+                            <span className="gmma-detail-label">Group Sep.</span>
+                            <span className="gmma-detail-value metric-positive">
+                              {selectedAlertDetails.separation_pct?.toFixed(2) ?? '—'}%
+                            </span>
+                          </div>
+                          <div className="gmma-detail-item">
+                            <span className="gmma-detail-label">Volume</span>
+                            <span className="gmma-detail-value">
+                              {formatNumber(selectedAlertDetails.volume)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       {/* EMA group value pills */}
@@ -937,13 +990,13 @@ function App() {
                     </div>
                   )}
 
-                  {loadingHistory ? (
-                    <div className="glass-panel empty-state">
-                      <div className="loading-spinner" style={{ margin: '0 auto 15px auto', width: '30px', height: '30px' }}></div>
-                      <h4>Loading Chart Data...</h4>
-                    </div>
-                  ) : (
-                    history.length > 0 && (
+                  <div style={{ position: 'relative' }}>
+                    {loadingHistory && (
+                      <div className="chart-loading-overlay">
+                        <div className="loading-spinner" style={{ width: '35px', height: '35px' }}></div>
+                      </div>
+                    )}
+                    {history.length > 0 && (
                       <ChartPanel
                         ticker={selectedTicker}
                         candles={history}
@@ -952,8 +1005,8 @@ function App() {
                         gmmaData={gmmaChartData}
                         theme={theme}
                       />
-                    )
-                  )}
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="glass-panel empty-state" style={{ height: '400px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>

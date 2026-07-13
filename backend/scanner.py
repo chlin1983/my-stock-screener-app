@@ -124,46 +124,119 @@ def get_exchange_tickers(exchange_name):
     return []
 
 def get_sp500_tickers():
+    # --- Source 1: Wikipedia ---
     try:
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         resp = requests.get(url, headers=HEADERS, timeout=15)
         tables = pd.read_html(io.StringIO(resp.text))
-        df = tables[0]
-        tickers = df['Symbol'].tolist()
-        # Clean ticker names (replace '.' with '-' for Yahoo Finance)
-        tickers = [t.replace('.', '-') for t in tickers]
-        return tickers
+        tickers = _parse_tickers_from_tables(tables)
+        if len(tickers) >= 400:
+            print(f"[S&P 500] Wikipedia: {len(tickers)} tickers scraped.")
+            return tickers
+        print(f"[S&P 500] Wikipedia returned only {len(tickers)} -- trying Nasdaq.com...")
     except Exception as e:
-        print(f"Error scraping S&P 500: {e}. Using empty fallback.")
-        return []
+        print(f"[S&P 500] Wikipedia failed: {e} -- trying Nasdaq.com...")
+
+    # --- Source 2: Official Nasdaq API ---
+    try:
+        url = "https://api.nasdaq.com/api/quote/list-type/sp500"
+        headers = {**HEADERS, "Accept": "application/json"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        rows = data.get("data", {}).get("data", {}).get("rows", [])
+        tickers = [r["symbol"].strip() for r in rows if r.get("symbol", "").strip()]
+        if len(tickers) >= 400:
+            print(f"[S&P 500] Nasdaq.com API: {len(tickers)} tickers scraped.")
+            return tickers
+        print(f"[S&P 500] Nasdaq.com returned only {len(tickers)} -- using fallback.")
+    except Exception as e:
+        print(f"[S&P 500] Nasdaq.com failed: {e} -- using NASDAQ-100 fallback.")
+
+    # --- Source 3: Fallback to Nasdaq-100 (better than nothing) ---
+    print(f"[S&P 500] All sources failed. Falling back to Nasdaq-100 list.")
+    return config.NASDAQ_100_FALLBACK
+
+def _parse_tickers_from_tables(tables, col_names=('Ticker', 'Symbol')):
+    """Helper: extract tickers from all tables that have any of the given column names."""
+    all_tickers = []
+    for t in tables:
+        for col in col_names:
+            if col in t.columns:
+                for sym in t[col].tolist():
+                    if isinstance(sym, str):
+                        sym = sym.strip().replace('.', '-')
+                        if sym and sym[0].isalpha():
+                            all_tickers.append(sym)
+                break
+    # Deduplicate while preserving order
+    seen = set()
+    return [t for t in all_tickers if not (t in seen or seen.add(t))]
+
 
 def get_nasdaq100_tickers():
+    # --- Source 1: Wikipedia ---
     try:
         url = "https://en.wikipedia.org/wiki/Nasdaq-100"
         resp = requests.get(url, headers=HEADERS, timeout=15)
-        tables = pd.read_html(io.StringIO(resp.text))
-        for t in tables:
-            if 'Ticker' in t.columns:
-                return [sym.replace('.', '-') for sym in t['Ticker'].tolist()]
-            elif 'Symbol' in t.columns:
-                return [sym.replace('.', '-') for sym in t['Symbol'].tolist()]
-        return config.NASDAQ_100_FALLBACK
+        unique = _parse_tickers_from_tables(pd.read_html(io.StringIO(resp.text)))
+        if len(unique) >= 50:
+            print(f"[Nasdaq-100] Wikipedia: {len(unique)} tickers scraped.")
+            return unique
+        print(f"[Nasdaq-100] Wikipedia returned only {len(unique)} tickers -- trying Nasdaq.com...")
     except Exception as e:
-        print(f"Error scraping Nasdaq 100: {e}. Using fallback.")
-        return config.NASDAQ_100_FALLBACK
+        print(f"[Nasdaq-100] Wikipedia failed: {e} -- trying Nasdaq.com...")
+
+    # --- Source 2: Official Nasdaq website ---
+    try:
+        url = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+        headers = {**HEADERS, "Accept": "application/json"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        rows = data.get("data", {}).get("data", {}).get("rows", [])
+        tickers = [r["symbol"].strip() for r in rows if r.get("symbol", "").strip()]
+        if len(tickers) >= 50:
+            print(f"[Nasdaq-100] Nasdaq.com API: {len(tickers)} tickers scraped.")
+            return tickers
+        print(f"[Nasdaq-100] Nasdaq.com returned only {len(tickers)} -- using hardcoded fallback.")
+    except Exception as e:
+        print(f"[Nasdaq-100] Nasdaq.com failed: {e} -- using hardcoded fallback.")
+
+    # --- Source 3: Hardcoded fallback (last resort) ---
+    print(f"[Nasdaq-100] Using hardcoded fallback ({len(config.NASDAQ_100_FALLBACK)} tickers).")
+    return config.NASDAQ_100_FALLBACK
+
 
 def get_dow30_tickers():
+    # --- Source 1: Wikipedia ---
     try:
         url = "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average"
         resp = requests.get(url, headers=HEADERS, timeout=15)
-        tables = pd.read_html(io.StringIO(resp.text))
-        for t in tables:
-            if 'Symbol' in t.columns:
-                return [sym.replace('.', '-') for sym in t['Symbol'].tolist()]
-        return config.DOW_30_FALLBACK
+        tickers = _parse_tickers_from_tables(pd.read_html(io.StringIO(resp.text)))
+        if len(tickers) >= 25:
+            print(f"[Dow 30] Wikipedia: {len(tickers)} tickers scraped.")
+            return tickers
+        print(f"[Dow 30] Wikipedia returned only {len(tickers)} -- trying Nasdaq.com...")
     except Exception as e:
-        print(f"Error scraping Dow 30: {e}. Using fallback.")
-        return config.DOW_30_FALLBACK
+        print(f"[Dow 30] Wikipedia failed: {e} -- trying Nasdaq.com...")
+
+    # --- Source 2: Official Nasdaq API ---
+    try:
+        url = "https://api.nasdaq.com/api/quote/list-type/dow_jones"
+        headers = {**HEADERS, "Accept": "application/json"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        rows = data.get("data", {}).get("data", {}).get("rows", [])
+        tickers = [r["symbol"].strip() for r in rows if r.get("symbol", "").strip()]
+        if len(tickers) >= 25:
+            print(f"[Dow 30] Nasdaq.com API: {len(tickers)} tickers scraped.")
+            return tickers
+        print(f"[Dow 30] Nasdaq.com returned only {len(tickers)} -- using hardcoded fallback.")
+    except Exception as e:
+        print(f"[Dow 30] Nasdaq.com failed: {e} -- using hardcoded fallback.")
+
+    # --- Source 3: Hardcoded fallback (last resort) ---
+    print(f"[Dow 30] Using hardcoded fallback ({len(config.DOW_30_FALLBACK)} tickers).")
+    return config.DOW_30_FALLBACK
 
 def check_trend_template(df):
     """
@@ -664,5 +737,6 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
     
     # Save results to cache file
     config.write_json("scan_results.json", scan_results, indent=2)
+    config.write_json(f"scan_results_{universe_name.lower()}.json", scan_results, indent=2)
     
     return scan_results

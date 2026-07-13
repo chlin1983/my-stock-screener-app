@@ -140,11 +140,26 @@ DOW_30_FALLBACK = [
 ]
 
 NASDAQ_100_FALLBACK = [
-    "AAPL", "MSFT", "AMZN", "NVDA", "META", "GOOGL", "GOOG", "TSLA", "AVGO", "PEP",
-    "AZN", "COST", "CSCO", "CMCSA", "ADBE", "TXN", "QCOM", "AMD", "INTC", "ISRG",
-    "HON", "AMGN", "INTU", "MDLZ", "VRTX", "BKNG", "ADI", "ADP", "REGN", "GILD",
-    "PANW", "MDLZ", "SNPS", "CDNS", "MELI", "KLAC", "NXPI", "MAR", "ORLY", "ASML",
-    "LRCX", "CTAS", "FTNT", "WDAY", "PCAR", "MNST", "KDP", "AEP", "PAYX", "DDOG"
+    # Top 10 by market cap
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "TSLA", "AVGO", "COST",
+    # 11-20
+    "NFLX", "ASML", "AZN", "PEP", "LIN", "QCOM", "CSCO", "TXN", "ISRG", "AMGN",
+    # 21-30
+    "INTU", "HON", "CMCSA", "VRTX", "AMAT", "BKNG", "ADI", "MU", "REGN", "GILD",
+    # 31-40
+    "PANW", "LRCX", "KLAC", "MDLZ", "CDNS", "SNPS", "SBUX", "CTAS", "MELI", "FTNT",
+    # 41-50
+    "ORLY", "NXPI", "INTC", "ADSK", "MAR", "KDP", "WDAY", "PAYX", "PCAR", "ROST",
+    # 51-60
+    "IDXX", "CPRT", "FAST", "EA", "GEHC", "CRWD", "DXCM", "MRVL", "VRSK", "ABNB",
+    # 61-70
+    "ROP", "MNST", "ODFL", "DLTR", "AEP", "BIIB", "TEAM", "KHC", "FANG", "EXC",
+    # 71-80  (ANSS removed — acquired by Synopsys Jan 2024)
+    "CTSH", "DDOG", "TTD", "MRNA", "ON", "ZS", "CEG", "XEL", "CSGP", "CCEP",
+    # 81-90
+    "TTWO", "SIRI", "ILMN", "ALGN", "MDB", "ARM", "DASH", "SMCI", "PLTR", "AMD",
+    # 91-101
+    "ADP", "ADBE", "CDW", "GFS", "MCHP", "PDD", "PYPL", "WBD", "MSTR", "APP", "COIN",
 ]
 
 DEFAULT_WATCHLIST = ["AAPL", "MSFT", "NVDA", "AMZN", "TSLA", "META", "NFLX", "AMD", "SMCI", "PLTR"]
