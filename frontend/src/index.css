@@ -131,7 +131,7 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
+  margin-bottom: 4px;
 }
 
 .header-title-container {
@@ -1849,7 +1849,7 @@ kbd {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
   transition: all 0.3s ease;
 }
 
@@ -2017,7 +2017,7 @@ kbd {
 .dashboard-navigation-tabs {
   display: flex;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 8px;
   border-bottom: 1px solid var(--glass-border);
   padding-bottom: 8px;
 }
