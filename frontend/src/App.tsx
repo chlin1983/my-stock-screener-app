@@ -7,6 +7,7 @@ import { TradeLog } from './components/TradeLog';
 import { TradeLogSidebar } from './components/TradeLogSidebar';
 import { AssetAllocationMap } from './components/AssetAllocationMap';
 import { AIChatbot } from './components/AIChatbot';
+import { NewsPanel } from './components/NewsPanel';
 
 interface MA20Alert {
 
@@ -84,7 +85,7 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [activeTab, setActiveTab] = useState<'ma20' | 'vcp' | 'gmma'>('ma20');
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
-  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot'>('screener');
+  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot' | 'news'>('screener');
   const [portfolioRefreshTrigger, setPortfolioRefreshTrigger] = useState<number>(0);
   const [tradeLogRefreshTrigger, setTradeLogRefreshTrigger] = useState<number>(0);
 
@@ -809,6 +810,15 @@ function App() {
             >
               🤖 AI Advisor
             </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'news' ? 'active' : ''}`}
+              onClick={() => {
+                setDashboardMode('news');
+                setShowSidebar(false);
+              }}
+            >
+              📰 News Feed
+            </button>
           </div>
 
           {dashboardMode === 'screener' ? (
@@ -1125,6 +1135,8 @@ function App() {
               refreshKey={tradeLogRefreshTrigger}
               onSwitchToPortfolio={() => setDashboardMode('portfolio')}
             />
+          ) : dashboardMode === 'news' ? (
+            <NewsPanel theme={theme} />
           ) : (
             <AIChatbot theme={theme} />
           )}

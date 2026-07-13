@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import yfinance as yf
+import time
+import httpx
+import re
 
 import config
 import scanner
@@ -764,6 +767,170 @@ def ai_chat(req: AIChatRequest):
         print(f"Gemini API Error: {e}")
         raise HTTPException(status_code=500, detail=f"AI Chatbot Error: {str(e)}")
 
+
+# News Scraping Cache
+# Keys: "list_{category}" or "article_{id}"
+# Values: { "data": ..., "timestamp": float }
+news_cache = {}
+CACHE_TTL = 300 # 5 minutes in seconds
+
+# Keywords indicating China-domestic focused articles (title/summary filtering)
+CHINA_KEYWORDS = [
+    # Chinese domestic market
+    "A股", "A 股", "沪指", "深指", "上证", "深证", "创业板", "科创板", "北交所",
+    # China-specific entities
+    "中国证监会", "证监会", "国务院", "人民银行", "央行", "人民币",
+    # Domestic companies / sectors frequently covered only for CN market
+    "A股存储", "兆易创新", "北京君正", "江波龙", "佰维存储",
+    # Geopolitical / political
+    "习近平", "中共", "中央", "国常会",
+    # Macro domestic policy
+    "内地", "大陆", "中资", "中概", "十五五", "五年规划",
+    # A-share indices
+    "沪深", "沪深300",
+]
+
+def extract_ssr_json(html_text: str) -> dict:
+    match = re.search(r"__SSR__\s*=\s*(\{.*?\})(;|\s*$|<)", html_text, re.DOTALL)
+    if not match:
+        raise ValueError("Could not find __SSR__ JSON data in page")
+    try:
+        return json.loads(match.group(1))
+    except Exception as e:
+        raise ValueError(f"Failed to parse __SSR__ JSON data: {str(e)}")
+
+@app.get("/news/list")
+async def get_news_list(category: str = "global", exclude_china: bool = False):
+    global news_cache
+    cache_key = f"list_{category}_noChina={exclude_china}"
+    now = time.time()
+    
+    # Return from cache if valid
+    if cache_key in news_cache and now - news_cache[cache_key]["timestamp"] < CACHE_TTL:
+        return news_cache[cache_key]["data"]
+        
+    url_map = {
+        "global": "https://wallstreetcn.com/",
+        "shares": "https://wallstreetcn.com/news/shares",
+        "ai": "https://wallstreetcn.com/news/ai"
+    }
+    
+    url = url_map.get(category, "https://wallstreetcn.com/")
+    mobile_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
+    headers = {
+        "User-Agent": mobile_ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, follow_redirects=True, timeout=15.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch from WallStreetCN")
+                
+            ssr_data = extract_ssr_json(resp.text)
+            items = ssr_data.get("state", {}).get("default", {}).get("children", {}).get("default", {}).get("data", {}).get("items", [])
+            
+            cleaned_items = []
+            for item in items:
+                if item.get("resource_type") != "article":
+                    continue
+                res = item.get("resource", {})
+                if not res:
+                    continue
+                    
+                author_data = res.get("author", {})
+                author_name = author_data.get("display_name") if isinstance(author_data, dict) else str(author_data)
+                
+                img_data = res.get("image", {})
+                img_url = img_data.get("uri") if isinstance(img_data, dict) else str(img_data)
+                
+                cleaned_items.append({
+                    "id": res.get("id"),
+                    "title": res.get("title"),
+                    "summary": res.get("content_short"),
+                    "author": author_name,
+                    "published_at": res.get("display_time"),
+                    "image_url": img_url,
+                    "url": f"https://wallstreetcn.com/articles/{res.get('id')}"
+                })
+
+            # Apply China filter if requested
+            if exclude_china:
+                def is_china_news(item: dict) -> bool:
+                    text = (item.get("title") or "") + (item.get("summary") or "")
+                    return any(kw in text for kw in CHINA_KEYWORDS)
+                cleaned_items = [item for item in cleaned_items if not is_china_news(item)]
+                
+            news_cache[cache_key] = {
+                "data": cleaned_items,
+                "timestamp": now
+            }
+            return cleaned_items
+            
+    except Exception as e:
+        print(f"Error fetching news list for {category}: {e}")
+        if cache_key in news_cache:
+            return news_cache[cache_key]["data"]
+        raise HTTPException(status_code=500, detail=f"Failed to load news feed: {str(e)}")
+
+@app.get("/news/article/{article_id}")
+async def get_news_article(article_id: int):
+    global news_cache
+    cache_key = f"article_{article_id}"
+    now = time.time()
+    
+    if cache_key in news_cache and now - news_cache[cache_key]["timestamp"] < CACHE_TTL:
+        return news_cache[cache_key]["data"]
+        
+    url = f"https://wallstreetcn.com/articles/{article_id}"
+    mobile_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
+    headers = {
+        "User-Agent": mobile_ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, follow_redirects=True, timeout=15.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=f"Article not found: {article_id}")
+                
+            ssr_data = extract_ssr_json(resp.text)
+            article = ssr_data.get("state", {}).get("default", {}).get("children", {}).get("default", {}).get("data", {}).get("article", {})
+            if not article:
+                raise ValueError("Article details not found in Svelte SSR response")
+                
+            author_data = article.get("author", {})
+            author_name = author_data.get("display_name") if isinstance(author_data, dict) else str(author_data)
+            
+            img_data = article.get("image", {})
+            img_url = img_data.get("uri") if isinstance(img_data, dict) else str(img_data)
+            
+            cleaned_article = {
+                "id": article.get("id"),
+                "title": article.get("title"),
+                "content": article.get("content"),
+                "summary": article.get("content_short"),
+                "author": author_name,
+                "published_at": article.get("display_time"),
+                "image_url": img_url,
+                "url": url
+            }
+            
+            news_cache[cache_key] = {
+                "data": cleaned_article,
+                "timestamp": now
+            }
+            return cleaned_article
+            
+    except Exception as e:
+        print(f"Error fetching news article {article_id}: {e}")
+        if cache_key in news_cache:
+            return news_cache[cache_key]["data"]
+        raise HTTPException(status_code=500, detail=f"Failed to load article: {str(e)}")
 
 
 if __name__ == "__main__":
