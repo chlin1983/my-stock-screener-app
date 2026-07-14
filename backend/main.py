@@ -678,6 +678,25 @@ def delete_favorite(article_id: int):
     _save_favorites(favorites)
     return {"status": "success", "message": "Article removed from favorites"}
 
+CHAT_HISTORY_KEY = "chat_history.json"
+
+@app.get("/ai/chat/sessions")
+def get_chat_sessions():
+    try:
+        if not config.json_exists(CHAT_HISTORY_KEY):
+            return {"sessions": []}
+        return config.read_json(CHAT_HISTORY_KEY)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load chat history: {str(e)}")
+
+@app.post("/ai/chat/sessions")
+def save_chat_sessions(payload: dict):
+    try:
+        config.write_json(CHAT_HISTORY_KEY, payload)
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save chat history: {str(e)}")
+
 class ChatMessage(BaseModel):
     role: str  # "user" or "model"
     content: str
