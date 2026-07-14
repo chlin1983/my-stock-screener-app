@@ -1,0 +1,16 @@
+# This file is used to ignore files during gcloud deployments
+.gcloudignore
+.git
+.gitignore
+
+# Exclude local environment configs and secret keys
+.env.local
+*-key.json
+*service-account-key*.json
+*.json.key
+
+# Exclude python venv and cache
+.venv/
+venv/
+cache/
+__pycache__/

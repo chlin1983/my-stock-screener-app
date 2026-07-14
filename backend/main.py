@@ -1,6 +1,7 @@
 import os
 import json
 import uvicorn
+import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -284,6 +285,115 @@ def get_stock_history(ticker: str):
         return hist_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch stock history: {str(e)}")
+
+def translate_to_mandarin(text: str) -> str:
+    """Uses Gemini API to translate the business summary to Mandarin.
+    Falls back to English text if genai is not available or errors out.
+    """
+    if not HAS_GENAI or not config.GEMINI_API_KEY or not text or text.startswith("No company summary available") or text.startswith("Failed to load"):
+        return text
+    try:
+        model = genai.GenerativeModel('gemini-3.5-flash')
+        prompt = (
+            "Please translate the following English business description of a company into clear, "
+            "professional, and natural Chinese (Mandarin). Only return the translated text without any "
+            "introductory or concluding remarks:\n\n" + text
+        )
+        response = model.generate_content(prompt)
+        if response and response.text:
+            return response.text.strip()
+    except Exception as e:
+        print(f"Gemini Translation error for stock description: {e}")
+    return text
+
+@app.get("/stock/{ticker}/details")
+def get_stock_details(ticker: str):
+    ticker = ticker.upper().strip()
+    cache_filename = f"details/{ticker}.json"
+    
+    # Check if cache is fresh (less than 7 days old)
+    seven_days_ago = time.time() - 7 * 24 * 3600
+    if config.json_exists(cache_filename) and config.get_json_mtime(cache_filename) > seven_days_ago:
+        try:
+            return config.read_json(cache_filename)
+        except Exception:
+            pass # Fallback to live fetch if cache read fails
+            
+    try:
+        t = yf.Ticker(ticker)
+        
+        # 1. Fetch info
+        info = t.info
+        summary = info.get("longBusinessSummary", "No company summary available.")
+        summary = translate_to_mandarin(summary)
+        sector = info.get("sector", "N/A")
+        industry = info.get("industry", "N/A")
+        website = info.get("website", "")
+        market_cap = info.get("marketCap", None)
+        long_name = info.get("longName", ticker)
+        
+        # 2. Fetch quarterly financials
+        df = t.quarterly_financials
+        financials = []
+        if df is not None and not df.empty:
+            import pandas as pd
+            import numpy as np
+            sorted_cols = sorted(df.columns)
+            for col in sorted_cols:
+                date_str = col.strftime("%Y-%m-%d")
+                
+                def get_row(keys):
+                    for k in keys:
+                        if k in df.index:
+                            val = df.loc[k, col]
+                            if isinstance(val, (pd.Series, np.ndarray)):
+                                val = val.iloc[0] if hasattr(val, 'iloc') else val[0]
+                            if not pd.isna(val):
+                                return float(val)
+                    return None
+                    
+                revenue = get_row(['Total Revenue', 'Operating Revenue'])
+                net_income = get_row(['Net Income', 'Net Income Common Stockholders'])
+                eps = get_row(['Diluted EPS', 'Basic EPS'])
+                
+                financials.append({
+                    "quarter": date_str,
+                    "revenue": revenue,
+                    "net_income": net_income,
+                    "eps": eps
+                })
+                
+        data = {
+            "ticker": ticker,
+            "name": long_name,
+            "summary": summary,
+            "sector": sector,
+            "industry": industry,
+            "website": website,
+            "market_cap": market_cap,
+            "financials": financials
+        }
+        
+        # Save to cache (creates details/ folder if local)
+        if config.STORAGE_TYPE == "local":
+            os.makedirs(os.path.join(config.LOCAL_CACHE_DIR, "details"), exist_ok=True)
+            
+        config.write_json(cache_filename, data, indent=2)
+        return data
+        
+    except Exception as e:
+        print(f"Error fetching stock details for {ticker}: {e}")
+        # Return fallback empty structure
+        return {
+            "ticker": ticker,
+            "name": ticker,
+            "summary": "Failed to load company summary.",
+            "sector": "N/A",
+            "industry": "N/A",
+            "website": "",
+            "market_cap": None,
+            "financials": []
+        }
 
 class UserSettings(BaseModel):
     ma20Color: Optional[str] = None
@@ -850,7 +960,8 @@ def ai_chat(req: AIChatRequest):
 # Keys: "list_{category}" or "article_{id}"
 # Values: { "data": ..., "timestamp": float }
 news_cache = {}
-CACHE_TTL = 300 # 5 minutes in seconds
+CACHE_TTL = 900          # 15 minutes for news list in seconds
+ARTICLE_CACHE_TTL = 86400 # 24 hours for article details in seconds
 
 # Keywords indicating China-domestic focused articles (title/summary filtering)
 CHINA_KEYWORDS = [
@@ -959,7 +1070,7 @@ async def get_news_article(article_id: int):
     cache_key = f"article_{article_id}"
     now = time.time()
     
-    if cache_key in news_cache and now - news_cache[cache_key]["timestamp"] < CACHE_TTL:
+    if cache_key in news_cache and now - news_cache[cache_key]["timestamp"] < ARTICLE_CACHE_TTL:
         return news_cache[cache_key]["data"]
         
     url = f"https://wallstreetcn.com/articles/{article_id}"
@@ -1009,6 +1120,49 @@ async def get_news_article(article_id: int):
         if cache_key in news_cache:
             return news_cache[cache_key]["data"]
         raise HTTPException(status_code=500, detail=f"Failed to load article: {str(e)}")
+
+
+async def warm_news_cache_loop():
+    """Background task to keep the news feed cache warm and pre-fetch article details."""
+    # Wait a few seconds after startup to let the server bind and initialize
+    await asyncio.sleep(5)
+    while True:
+        try:
+            print("[INFO] Background task: Warming news cache...")
+            for category in ["global", "shares", "ai"]:
+                for exclude_china in [False, True]:
+                    try:
+                        # Fetch and cache list
+                        await get_news_list(category=category, exclude_china=exclude_china)
+                    except Exception as e:
+                        print(f"[WARN] Failed to warm news list for {category} (exclude_china={exclude_china}): {e}")
+            
+            # Pre-fetch details of top 3 articles for each category to cache them
+            for category in ["global", "shares", "ai"]:
+                cache_key = f"list_{category}_noChina=False"
+                if cache_key in news_cache:
+                    items = news_cache[cache_key]["data"]
+                    for item in items[:3]:
+                        article_id = item.get("id")
+                        if article_id:
+                            article_cache_key = f"article_{article_id}"
+                            # If not already cached, fetch and cache it
+                            if article_cache_key not in news_cache:
+                                try:
+                                    await get_news_article(article_id)
+                                    await asyncio.sleep(1.0)  # Rate limiting safety spacer
+                                except Exception as e:
+                                    print(f"[WARN] Failed to warm article detail for ID {article_id}: {e}")
+        except Exception as e:
+            print(f"[ERROR] Error in warm_news_cache_loop: {e}")
+        
+        # Sleep for 5 minutes before warming again
+        await asyncio.sleep(300)
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the background task
+    asyncio.create_task(warm_news_cache_loop())
 
 
 if __name__ == "__main__":

@@ -14,6 +14,14 @@ if os.path.exists(ENV_FILE):
                 key, _, value = line.partition("=")
                 os.environ.setdefault(key.strip(), value.strip())
 
+# If GOOGLE_APPLICATION_CREDENTIALS is set but the file does not exist,
+# remove it to allow fallback to Application Default Credentials (ADC) on Cloud Run/GCP.
+creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+if creds_path and not os.path.exists(creds_path):
+    print(f"Warning: GOOGLE_APPLICATION_CREDENTIALS file not found at '{creds_path}'. "
+          "Removing from environment to fallback to Application Default Credentials (ADC).")
+    os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+
 # Check storage environment configuration
 STORAGE_TYPE = os.environ.get("STORAGE_TYPE", "local").lower()  # 'local' or 'gcs'
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "")
