@@ -38,6 +38,7 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   
   const [excludeChina, setExcludeChina] = useState<boolean>(false);
+  const [selectedDate, setSelectedDate] = useState<string>('');
 
   // Client-side session caching for lists and articles
   const listCacheRef = useRef<Record<string, NewsItem[]>>({});
@@ -56,8 +57,8 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
     }
   }, [BACKEND_URL]);
 
-  const fetchNewsList = useCallback(async (cat: 'global' | 'shares' | 'ai' | 'favorites', noChina: boolean = false) => {
-    const cacheKey = `${cat}_noChina=${noChina}`;
+  const fetchNewsList = useCallback(async (cat: 'global' | 'shares' | 'ai' | 'favorites', noChina: boolean = false, dateStr: string = '') => {
+    const cacheKey = `${cat}_noChina=${noChina}_date=${dateStr}`;
     const cachedData = listCacheRef.current[cacheKey];
 
     // If we have cached data, display it immediately and bypass the skeleton loader
@@ -81,7 +82,8 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
           setSelectedArticleId(data[0].id);
         }
       } else {
-        const response = await fetch(`${BACKEND_URL}/news/list?category=${cat}&exclude_china=${noChina}`);
+        const url = `${BACKEND_URL}/news/list?category=${cat}&exclude_china=${noChina}${dateStr ? `&date=${dateStr}` : ''}`;
+        const response = await fetch(url);
         if (!response.ok) {
           throw new Error('Failed to load articles from the server.');
         }
@@ -198,10 +200,10 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
     fetchFavorites();
   }, [fetchFavorites]);
 
-  // Load list when category OR excludeChina changes
+  // Load list when category, excludeChina, OR selectedDate changes
   useEffect(() => {
-    fetchNewsList(activeCategory, excludeChina);
-  }, [activeCategory, excludeChina, fetchNewsList]);
+    fetchNewsList(activeCategory, excludeChina, selectedDate);
+  }, [activeCategory, excludeChina, selectedDate, fetchNewsList]);
 
   // Load article detail when selected ID changes
   useEffect(() => {
@@ -213,7 +215,7 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
 
 
   const handleManualRefresh = () => {
-    fetchNewsList(activeCategory, excludeChina);
+    fetchNewsList(activeCategory, excludeChina, selectedDate);
     if (selectedArticleId) {
       fetchArticleDetail(selectedArticleId);
     }
@@ -279,7 +281,61 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
           </button>
         </div>
 
-        <div className="news-banner-right">
+        <div className="news-banner-right" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          {/* Date Picker (Hidden for Favorites) */}
+          {activeCategory !== 'favorites' && (
+            <div className="news-date-selector" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="date-label" style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 500 }}>
+                📅 View Date:
+              </span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  type="date"
+                  className="news-date-input"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    setSelectedArticleId(null);
+                    setSelectedArticle(null);
+                  }}
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: '6px',
+                    padding: '5px 8px',
+                    color: 'var(--color-text-main)',
+                    fontSize: '12px',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                />
+                {selectedDate && (
+                  <button
+                    onClick={() => {
+                      setSelectedDate('');
+                      setSelectedArticleId(null);
+                      setSelectedArticle(null);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--color-text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      marginLeft: '6px',
+                      padding: '0 4px',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                    title="Reset to Latest Today"
+                  >
+                    ✖
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* China filter toggle */}
           <div
             className={`news-china-toggle ${excludeChina ? 'active' : ''}`}

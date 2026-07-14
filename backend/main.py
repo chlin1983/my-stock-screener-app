@@ -989,22 +989,51 @@ def extract_ssr_json(html_text: str) -> dict:
         raise ValueError(f"Failed to parse __SSR__ JSON data: {str(e)}")
 
 @app.get("/news/list")
-async def get_news_list(category: str = "global", exclude_china: bool = False):
+async def get_news_list(category: str = "global", exclude_china: bool = False, date: Optional[str] = None):
     global news_cache
-    cache_key = f"list_{category}_noChina={exclude_china}"
+    cache_key = f"list_{category}_noChina={exclude_china}_date={date}"
     now = time.time()
     
     # Return from cache if valid
     if cache_key in news_cache and now - news_cache[cache_key]["timestamp"] < CACHE_TTL:
         return news_cache[cache_key]["data"]
         
-    url_map = {
-        "global": "https://wallstreetcn.com/",
-        "shares": "https://wallstreetcn.com/news/shares",
-        "ai": "https://wallstreetcn.com/news/ai"
+    url = "https://api-one-wscn.awtmt.com/apiv1/content/information-flow"
+    
+    channel_map = {
+        "global": "global",
+        "shares": "shares",
+        "ai": "ai"
+    }
+    channel = channel_map.get(category, "global")
+    
+    params = {
+        "channel": channel,
+        "accept": "article",
+        "limit": "30"
     }
     
-    url = url_map.get(category, "https://wallstreetcn.com/")
+    if date:
+        try:
+            from datetime import datetime, timezone, timedelta
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            dt = dt.replace(hour=23, minute=59, second=59)
+            cst_tz = timezone(timedelta(hours=8))
+            dt_cst = dt.replace(tzinfo=cst_tz)
+            end_ts = int(dt_cst.timestamp())
+            
+            cursor_dict = {
+                "SlotOffset": 0,
+                "TotalCount": 30,
+                "ArticleLe": end_ts
+            }
+            import base64
+            cursor_str = json.dumps(cursor_dict)
+            cursor_b64 = base64.b64encode(cursor_str.encode('utf-8')).decode('utf-8')
+            params["cursor"] = cursor_b64
+        except Exception as e:
+            print(f"Error parsing date parameter {date}: {e}")
+            
     mobile_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
     headers = {
         "User-Agent": mobile_ua,
@@ -1014,12 +1043,12 @@ async def get_news_list(category: str = "global", exclude_china: bool = False):
     
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, follow_redirects=True, timeout=15.0)
+            resp = await client.get(url, params=params, headers=headers, follow_redirects=True, timeout=15.0)
             if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch from WallStreetCN")
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch from WallStreetCN API")
                 
-            ssr_data = extract_ssr_json(resp.text)
-            items = ssr_data.get("state", {}).get("default", {}).get("children", {}).get("default", {}).get("data", {}).get("items", [])
+            data = resp.json()
+            items = data.get("data", {}).get("items", [])
             
             cleaned_items = []
             for item in items:
