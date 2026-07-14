@@ -37,7 +37,6 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
   const [errorList, setErrorList] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   
-  const [countdown, setCountdown] = useState<number>(300); // 5-minute auto refresh
   const [excludeChina, setExcludeChina] = useState<boolean>(false);
 
   const BACKEND_URL = (window as any).__env__?.VITE_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
@@ -186,29 +185,13 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
     }
   }, [selectedArticleId, fetchArticleDetail]);
 
-  // Countdown timer for auto-refresh
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          fetchNewsList(activeCategory);
-          if (selectedArticleId) {
-            fetchArticleDetail(selectedArticleId);
-          }
-          return 300; // reset
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [activeCategory, excludeChina, selectedArticleId, fetchNewsList, fetchArticleDetail]);
+
 
   const handleManualRefresh = () => {
     fetchNewsList(activeCategory, excludeChina);
     if (selectedArticleId) {
       fetchArticleDetail(selectedArticleId);
     }
-    setCountdown(300);
   };
 
   const formatPublishTime = (timestamp: number) => {
@@ -222,11 +205,7 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
     });
   };
 
-  const formatCountdown = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
+
 
   return (
     <div className="news-panel-layout">
@@ -293,7 +272,6 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
           </div>
 
           <div className="news-timer-section">
-            <span className="news-timer-label">Auto-refresh: <strong>{formatCountdown(countdown)}</strong></span>
             <button className="btn btn-refresh-news" onClick={handleManualRefresh} title="Fetch Latest News">
               🔄 Refresh
             </button>
