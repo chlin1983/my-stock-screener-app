@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface NewsItem {
   id: number;
@@ -39,6 +39,10 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
   
   const [excludeChina, setExcludeChina] = useState<boolean>(false);
 
+  // Client-side session caching for lists and articles
+  const listCacheRef = useRef<Record<string, NewsItem[]>>({});
+  const articleCacheRef = useRef<Record<number, ArticleDetail>>({});
+
   const BACKEND_URL = (window as any).__env__?.VITE_BACKEND_URL || import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
   const fetchFavorites = useCallback(async () => {
@@ -53,7 +57,16 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
   }, [BACKEND_URL]);
 
   const fetchNewsList = useCallback(async (cat: 'global' | 'shares' | 'ai' | 'favorites', noChina: boolean = false) => {
-    setLoadingList(true);
+    const cacheKey = `${cat}_noChina=${noChina}`;
+    const cachedData = listCacheRef.current[cacheKey];
+
+    // If we have cached data, display it immediately and bypass the skeleton loader
+    if (cachedData) {
+      setArticles(cachedData);
+      setLoadingList(false);
+    } else {
+      setLoadingList(true);
+    }
     setErrorList(null);
     try {
       if (cat === 'favorites') {
@@ -63,6 +76,7 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
         }
         const data = await response.json();
         setArticles(data);
+        listCacheRef.current[cacheKey] = data;
         if (data.length > 0 && !selectedArticleId) {
           setSelectedArticleId(data[0].id);
         }
@@ -73,13 +87,16 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
         }
         const data = await response.json();
         setArticles(data);
+        listCacheRef.current[cacheKey] = data;
         if (data.length > 0 && !selectedArticleId) {
           setSelectedArticleId(data[0].id);
         }
       }
     } catch (err: any) {
       console.error(err);
-      setErrorList(err.message || 'Error fetching articles.');
+      if (!cachedData) {
+        setErrorList(err.message || 'Error fetching articles.');
+      }
     } finally {
       setLoadingList(false);
     }
@@ -100,6 +117,13 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
       return;
     }
 
+    // 3. Check in our session cache
+    const cachedArticle = articleCacheRef.current[id];
+    if (cachedArticle) {
+      setSelectedArticle(cachedArticle);
+      return;
+    }
+
     setLoadingDetail(true);
     setErrorDetail(null);
     try {
@@ -114,6 +138,7 @@ export function NewsPanel({ theme: _theme }: NewsPanelProps) {
       }
       const data = await response.json();
       setSelectedArticle(data);
+      articleCacheRef.current[id] = data;
     } catch (err: any) {
       console.error(err);
       // Fallback: search in loaded favorites
