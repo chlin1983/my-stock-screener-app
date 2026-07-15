@@ -529,6 +529,12 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   const [ma150Color, setMa150Color] = useState<string>(() => localStorage.getItem('ma150Color') || '#f97316');
   const [ma200Color, setMa200Color] = useState<string>(() => localStorage.getItem('ma200Color') || '#ec4899');
 
+  // Moving Average Period states (persistent with localStorage & backend)
+  const [ma20Period, setMa20Period] = useState<number>(() => Number(localStorage.getItem('ma20Period')) || 20);
+  const [ma50Period, setMa50Period] = useState<number>(() => Number(localStorage.getItem('ma50Period')) || 50);
+  const [ma150Period, setMa150Period] = useState<number>(() => Number(localStorage.getItem('ma150Period')) || 150);
+  const [ma200Period, setMa200Period] = useState<number>(() => Number(localStorage.getItem('ma200Period')) || 200);
+
   // Load custom settings from backend on mount
   useEffect(() => {
     const loadSettings = async () => {
@@ -551,6 +557,22 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
         if (data.ma200Color) {
           setMa200Color(data.ma200Color);
           localStorage.setItem('ma200Color', data.ma200Color);
+        }
+        if (data.ma20Period) {
+          setMa20Period(data.ma20Period);
+          localStorage.setItem('ma20Period', String(data.ma20Period));
+        }
+        if (data.ma50Period) {
+          setMa50Period(data.ma50Period);
+          localStorage.setItem('ma50Period', String(data.ma50Period));
+        }
+        if (data.ma150Period) {
+          setMa150Period(data.ma150Period);
+          localStorage.setItem('ma150Period', String(data.ma150Period));
+        }
+        if (data.ma200Period) {
+          setMa200Period(data.ma200Period);
+          localStorage.setItem('ma200Period', String(data.ma200Period));
         }
       } catch (e) {
         console.error("Failed to load user settings from backend:", e);
@@ -593,6 +615,27 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       });
     } catch (e) {
       console.error("Failed to save color change to backend:", e);
+    }
+  };
+
+  const handlePeriodChange = async (ma: 'MA20' | 'MA50' | 'MA150' | 'MA200', period: number) => {
+    if (isNaN(period) || period <= 0) return;
+    localStorage.setItem(`${ma.toLowerCase()}Period`, String(period));
+    if (ma === 'MA20') setMa20Period(period);
+    else if (ma === 'MA50') setMa50Period(period);
+    else if (ma === 'MA150') setMa150Period(period);
+    else if (ma === 'MA200') setMa200Period(period);
+
+    try {
+      await fetch(`${BACKEND_URL}/user-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [`${ma.toLowerCase()}Period`]: period
+        })
+      });
+    } catch (e) {
+      console.error("Failed to save period change to backend:", e);
     }
   };
 
@@ -698,11 +741,11 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
     // 3. Add Moving Average Lines (SMA)
     if (showMA20) {
-      const sma20Data = calculateSMA(candles, 20);
+      const sma20Data = calculateSMA(candles, ma20Period);
       const sma20Line = chart.addSeries(LineSeries, {
         color: ma20Color,
         lineWidth: 2,
-        title: 'MA20',
+        title: `MA${ma20Period}`,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -710,11 +753,11 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     }
 
     if (showMA50) {
-      const sma50Data = calculateSMA(candles, 50);
+      const sma50Data = calculateSMA(candles, ma50Period);
       const sma50Line = chart.addSeries(LineSeries, {
         color: ma50Color,
         lineWidth: 2,
-        title: 'MA50',
+        title: `MA${ma50Period}`,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -722,11 +765,11 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     }
 
     if (showMA150) {
-      const sma150Data = calculateSMA(candles, 150);
+      const sma150Data = calculateSMA(candles, ma150Period);
       const sma150Line = chart.addSeries(LineSeries, {
         color: ma150Color,
         lineWidth: 2,
-        title: 'MA150',
+        title: `MA${ma150Period}`,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -734,11 +777,11 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     }
 
     if (showMA200) {
-      const sma200Data = calculateSMA(candles, 200);
+      const sma200Data = calculateSMA(candles, ma200Period);
       const sma200Line = chart.addSeries(LineSeries, {
         color: ma200Color,
         lineWidth: 2,
-        title: 'MA200',
+        title: `MA${ma200Period}`,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -917,7 +960,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       clearTimeout(timerId);
       chart.remove();
     };
-  }, [candles, highlightDate, vcpContractions, gmmaData, theme, timeframe, showGMMA, showMA20, showMA50, showMA150, showMA200, ma20Color, ma50Color, ma150Color, ma200Color]);
+  }, [candles, highlightDate, vcpContractions, gmmaData, theme, timeframe, showGMMA, showMA20, showMA50, showMA150, showMA200, ma20Color, ma50Color, ma150Color, ma200Color, ma20Period, ma50Period, ma150Period, ma200Period]);
 
   return (
     <div className="chart-panel">
@@ -940,7 +983,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA20 color"
               />
-              <label htmlFor="checkbox-ma20" style={{ cursor: 'pointer' }}>MA20</label>
+              <label htmlFor="checkbox-ma20" style={{ cursor: 'pointer' }}>MA</label>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                value={ma20Period}
+                onChange={(e) => handlePeriodChange('MA20', parseInt(e.target.value) || 20)}
+                className="legend-period-input"
+                title="Change MA20 period"
+              />
             </span>
             <span className={`legend-item ${showMA50 ? 'active' : 'inactive'}`}>
               <input
@@ -957,7 +1009,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA50 color"
               />
-              <label htmlFor="checkbox-ma50" style={{ cursor: 'pointer' }}>MA50</label>
+              <label htmlFor="checkbox-ma50" style={{ cursor: 'pointer' }}>MA</label>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                value={ma50Period}
+                onChange={(e) => handlePeriodChange('MA50', parseInt(e.target.value) || 50)}
+                className="legend-period-input"
+                title="Change MA50 period"
+              />
             </span>
             <span className={`legend-item ${showMA150 ? 'active' : 'inactive'}`}>
               <input
@@ -974,7 +1035,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA150 color"
               />
-              <label htmlFor="checkbox-ma150" style={{ cursor: 'pointer' }}>MA150</label>
+              <label htmlFor="checkbox-ma150" style={{ cursor: 'pointer' }}>MA</label>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                value={ma150Period}
+                onChange={(e) => handlePeriodChange('MA150', parseInt(e.target.value) || 150)}
+                className="legend-period-input"
+                title="Change MA150 period"
+              />
             </span>
             <span className={`legend-item ${showMA200 ? 'active' : 'inactive'}`}>
               <input
@@ -991,7 +1061,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA200 color"
               />
-              <label htmlFor="checkbox-ma200" style={{ cursor: 'pointer' }}>MA200</label>
+              <label htmlFor="checkbox-ma200" style={{ cursor: 'pointer' }}>MA</label>
+              <input
+                type="number"
+                min="1"
+                max="500"
+                value={ma200Period}
+                onChange={(e) => handlePeriodChange('MA200', parseInt(e.target.value) || 200)}
+                className="legend-period-input"
+                title="Change MA200 period"
+              />
             </span>
             {/* GMMA Toggle Button */}
             <button
