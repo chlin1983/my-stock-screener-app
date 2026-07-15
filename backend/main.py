@@ -400,6 +400,10 @@ class UserSettings(BaseModel):
     ma50Color: Optional[str] = None
     ma150Color: Optional[str] = None
     ma200Color: Optional[str] = None
+    ma20Period: Optional[int] = None
+    ma50Period: Optional[int] = None
+    ma150Period: Optional[int] = None
+    ma200Period: Optional[int] = None
 
 @app.get("/user-settings")
 def get_user_settings():
@@ -413,8 +417,13 @@ def get_user_settings():
         "ma20Color": "#eab308",
         "ma50Color": "#3b82f6",
         "ma150Color": "#f97316",
-        "ma200Color": "#ec4899"
+        "ma200Color": "#ec4899",
+        "ma20Period": 20,
+        "ma50Period": 50,
+        "ma150Period": 150,
+        "ma200Period": 200
     }
+
 
 @app.post("/user-settings")
 def save_user_settings(settings: UserSettings):

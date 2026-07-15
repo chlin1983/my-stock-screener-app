@@ -793,6 +793,51 @@ tr.selected td {
   border-radius: 50%;
 }
 
+/* Legend Period Input */
+.legend-period-input {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  width: 32px;
+  padding: 0 2px;
+  margin-left: 1px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.legend-period-input:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.light-theme .legend-period-input:hover {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+.legend-period-input:focus {
+  background: var(--bg-tertiary);
+  color: var(--color-text-main);
+  border-color: var(--accent-primary);
+  outline: none;
+}
+
+/* Hide spinner for Chrome, Safari, Edge, Opera */
+.legend-period-input::-webkit-outer-spin-button,
+.legend-period-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Hide spinner for Firefox */
+.legend-period-input[type=number] {
+  -moz-appearance: textfield;
+}
+
 /* =============================================
    GMMA — Guppy Multiple Moving Average Styles
    ============================================= */
