@@ -525,32 +525,24 @@ def check_gmma(df, params):
 
     had_recent_crossover = crossover_day is not None
 
-    # --- Apply filters ---
+    # --- Check filters ---
+    reason = None
     if req_alignment and not is_bullish_aligned:
-        return {
-            "is_gmma": False,
-            "reason": f"Short group not above long group (min_short={min_short:.2f}, max_long={max_long:.2f})"
-        }
+        reason = f"Short group not above long group (min_short={min_short:.2f}, max_long={max_long:.2f})"
+    elif is_bullish_aligned and separation_pct < min_sep_pct:
+        reason = f"Group separation too narrow ({separation_pct*100:.2f}% < {min_sep_pct*100:.2f}%)"
+    elif not is_bullish_aligned and not had_recent_crossover:
+        reason = "No bullish alignment and no recent crossover detected"
 
-    if is_bullish_aligned and separation_pct < min_sep_pct:
-        return {
-            "is_gmma": False,
-            "reason": f"Group separation too narrow ({separation_pct*100:.2f}% < {min_sep_pct*100:.2f}%)"
-        }
-
-    # Must have either current alignment or a recent crossover
-    if not is_bullish_aligned and not had_recent_crossover:
-        return {
-            "is_gmma": False,
-            "reason": "No bullish alignment and no recent crossover detected"
-        }
+    is_gmma = (reason is None)
 
     # --- Build EMA snapshot for chart rendering ---
     short_ema_values = {str(p): round(float(short_emas[p].iloc[-1]), 4) for p in short_periods}
     long_ema_values  = {str(p): round(float(long_emas[p].iloc[-1]), 4)  for p in long_periods}
 
     return {
-        "is_gmma": True,
+        "is_gmma": is_gmma,
+        "reason": reason,
         "is_bullish_aligned": is_bullish_aligned,
         "had_recent_crossover": had_recent_crossover,
         "crossover_days_ago": crossover_day,
@@ -615,6 +607,7 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
     ma20_alerts = []
     vcp_alerts = []
     gmma_alerts = []
+    gmma_all = []
     failed_stocks = []
     
     # 2. Download Data in batches of 200 to prevent API timeouts or rate limits
@@ -675,8 +668,8 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
                     
                 # Check GMMA
                 gmma_res = check_gmma(ticker_df, gmma_params)
-                if gmma_res["is_gmma"]:
-                    gmma_alerts.append({
+                if "short_ema_values" in gmma_res:
+                    gmma_detail = {
                         "ticker": ticker,
                         "close": close_price,
                         "volume": volume,
@@ -686,11 +679,20 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
                         "separation_pct": gmma_res["separation_pct"],
                         "short_ema_values": gmma_res["short_ema_values"],
                         "long_ema_values": gmma_res["long_ema_values"],
-                    })
+                    }
+                    if universe_name.lower() in ["custom", "watchlist"]:
+                        gmma_all.append(gmma_detail)
+                    
+                    if gmma_res["is_gmma"]:
+                        gmma_alerts.append(gmma_detail)
 
                 # Cache stock historical data for chart panel retrieval
                 # To keep things fast, we store historical prices of alerts in the cache
-                if ma20_res["is_pullback"] or vcp_res["is_vcp"] or gmma_res["is_gmma"]:
+                # and all custom watchlist stocks so they can be viewed on the chart
+                if (ma20_res["is_pullback"] or 
+                    vcp_res["is_vcp"] or 
+                    gmma_res["is_gmma"] or 
+                    (universe_name.lower() in ["custom", "watchlist"] and "short_ema_values" in gmma_res)):
                     hist_data = {
                         "dates": [d.strftime("%Y-%m-%d") for d in ticker_df.index],
                         "open": ticker_df["Open"].tolist(),
@@ -709,7 +711,8 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
     unique_tickers = list(set(
         [a["ticker"] for a in ma20_alerts] +
         [a["ticker"] for a in vcp_alerts] +
-        [a["ticker"] for a in gmma_alerts]
+        [a["ticker"] for a in gmma_alerts] +
+        [a["ticker"] for a in gmma_all]
     ))
     ticker_names = {}
     for t in unique_tickers:
@@ -724,6 +727,8 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         a["name"] = ticker_names.get(a["ticker"], a["ticker"])
     for a in gmma_alerts:
         a["name"] = ticker_names.get(a["ticker"], a["ticker"])
+    for a in gmma_all:
+        a["name"] = ticker_names.get(a["ticker"], a["ticker"])
 
     scan_results = {
         "timestamp": datetime.now().isoformat(),
@@ -732,6 +737,7 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         "ma20_alerts": ma20_alerts,
         "vcp_alerts": vcp_alerts,
         "gmma_alerts": gmma_alerts,
+        "gmma_all": gmma_all,
         "failed_stocks": failed_stocks
     }
     

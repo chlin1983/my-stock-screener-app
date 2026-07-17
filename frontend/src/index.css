@@ -794,19 +794,27 @@ tr.selected td {
 }
 
 /* Legend Period Input */
+.legend-ma-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .legend-period-input {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 3px;
   color: inherit;
   font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  width: 32px;
-  padding: 0 2px;
-  margin-left: 1px;
-  text-align: center;
+  font-size: inherit;
+  font-weight: inherit;
+  padding: 0;
+  margin: 0;
+  text-align: left;
   transition: all 0.2s ease;
+  box-sizing: content-box;
 }
 
 .legend-period-input:hover {
@@ -824,6 +832,8 @@ tr.selected td {
   color: var(--color-text-main);
   border-color: var(--accent-primary);
   outline: none;
+  padding: 0 4px;
+  margin: 0 -4px;
 }
 
 /* Hide spinner for Chrome, Safari, Edge, Opera */
@@ -915,6 +925,12 @@ tr.selected td {
   background: rgba(16, 185, 129, 0.12);
   border: 1px solid rgba(16, 185, 129, 0.35);
   color: #10b981;
+}
+
+.gmma-badge-bearish {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
 }
 
 /* GMMA Detail Card (above chart on GMMA tab) */
