@@ -97,7 +97,7 @@ export const WatchlistManager: React.FC<WatchlistManagerProps> = ({
     }
 
     const updated = watchlists.map(w => w.id === activeId 
-      ? { ...w, tickers: [...w.tickers, ticker] } 
+      ? { ...w, tickers: [...w.tickers, ticker].sort((a, b) => a.localeCompare(b)) } 
       : w
     );
     onWatchlistsChange(updated);

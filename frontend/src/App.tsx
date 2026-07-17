@@ -8,6 +8,7 @@ import { TradeLogSidebar } from './components/TradeLogSidebar';
 import { AssetAllocationMap } from './components/AssetAllocationMap';
 import { AIChatbot } from './components/AIChatbot';
 import { NewsPanel } from './components/NewsPanel';
+import { AIStrategyProposal } from './components/AIStrategyProposal';
 
 interface MA20Alert {
 
@@ -60,6 +61,7 @@ interface ScanResults {
   ma20_alerts: MA20Alert[];
   vcp_alerts: VCPAlert[];
   gmma_alerts: GMMAAlert[];
+  gmma_all?: GMMAAlert[];
   message?: string;
 }
 
@@ -83,9 +85,9 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
 function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [activeTab, setActiveTab] = useState<'ma20' | 'vcp' | 'gmma'>('ma20');
+  const [activeTab, setActiveTab] = useState<'ma20' | 'vcp' | 'gmma' | 'gmma_all'>('ma20');
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
-  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot' | 'news'>('screener');
+  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot' | 'news' | 'ai-strategy'>('screener');
   const [portfolioRefreshTrigger, setPortfolioRefreshTrigger] = useState<number>(0);
   const [tradeLogRefreshTrigger, setTradeLogRefreshTrigger] = useState<number>(0);
 
@@ -98,7 +100,8 @@ function App() {
     scanned_count: 0,
     ma20_alerts: [],
     vcp_alerts: [],
-    gmma_alerts: []
+    gmma_alerts: [],
+    gmma_all: []
   });
   const [status, setStatus] = useState<ScanStatus>({
     is_running: false,
@@ -120,9 +123,17 @@ function App() {
   const [watchlists, setWatchlists] = useState<any[]>(() => {
     try {
       const stored = localStorage.getItem('ag_watchlists');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          return parsed.map((wl: any) => ({
+            ...wl,
+            tickers: Array.isArray(wl.tickers) ? [...wl.tickers].sort((a, b) => a.localeCompare(b)) : []
+          }));
+        }
+      }
     } catch {}
-    return [
+    const defaults = [
       {
         id: 'semiconductor',
         name: 'Semiconductor',
@@ -142,6 +153,10 @@ function App() {
         tickers: ['MRNA', 'BNTX', 'REGN', 'VRTX', 'AMGN', 'GILD', 'BIIB'],
       },
     ];
+    return defaults.map(wl => ({
+      ...wl,
+      tickers: wl.tickers.sort((a, b) => a.localeCompare(b))
+    }));
   });
 
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>(() => {
@@ -205,7 +220,8 @@ function App() {
         // Auto select first stock in current tab if exists
         const alertsList = activeTab === 'ma20' ? data.ma20_alerts :
                            activeTab === 'vcp'  ? data.vcp_alerts  :
-                                                  (data.gmma_alerts ?? []);
+                           activeTab === 'gmma' ? (data.gmma_alerts ?? []) :
+                                                  (data.gmma_all ?? []);
         if (alertsList.length > 0) {
           handleSelectStock(alertsList[0].ticker, alertsList[0]);
         }
@@ -218,6 +234,7 @@ function App() {
           ma20_alerts: [],
           vcp_alerts: [],
           gmma_alerts: [],
+          gmma_all: [],
           message: data.message || `No scan results found for ${target}`
         });
         setSelectedTicker('');
@@ -240,7 +257,8 @@ function App() {
     // Use ?? [] so an old cached scan without gmma_alerts never throws
     const list = activeTab === 'ma20' ? results.ma20_alerts :
                  activeTab === 'vcp'  ? results.vcp_alerts  :
-                                        (results.gmma_alerts ?? []);
+                 activeTab === 'gmma' ? (results.gmma_alerts ?? []) :
+                                        (results.gmma_all ?? []);
     if (list && list.length > 0) {
       handleSelectStock(list[0].ticker, list[0]);
     } else {
@@ -263,7 +281,8 @@ function App() {
 
       const list = activeTab === 'ma20' ? results.ma20_alerts :
                    activeTab === 'vcp'  ? results.vcp_alerts  :
-                                          (results.gmma_alerts ?? []);
+                   activeTab === 'gmma' ? (results.gmma_alerts ?? []) :
+                                          (results.gmma_all ?? []);
 
       if (!list || list.length === 0) return;
 
@@ -424,7 +443,8 @@ function App() {
           
           const list = activeTab === 'ma20' ? data.ma20_alerts :
                        activeTab === 'vcp'  ? data.vcp_alerts  :
-                                              (data.gmma_alerts ?? []);
+                       activeTab === 'gmma' ? (data.gmma_alerts ?? []) :
+                                              (data.gmma_all ?? []);
           if (list && list.length > 0) {
             handleSelectStock(list[0].ticker, list[0]);
           }
@@ -462,8 +482,8 @@ function App() {
     return date.toLocaleString();
   };
 
-  // Derive GMMA chart props from the selected alert (if on GMMA tab)
-  const gmmaChartData = activeTab === 'gmma' && selectedAlertDetails
+  // Derive GMMA chart props from the selected alert (if on GMMA/GMMA_all tab)
+  const gmmaChartData = (activeTab === 'gmma' || activeTab === 'gmma_all') && selectedAlertDetails
     ? {
         showByDefault: true,
         crossoverDaysAgo: (selectedAlertDetails as GMMAAlert).crossover_days_ago,
@@ -819,6 +839,16 @@ function App() {
             >
               📰 News Feed
             </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'ai-strategy' ? 'active' : ''}`}
+              onClick={() => {
+                setDashboardMode('ai-strategy');
+                setShowSidebar(false);
+              }}
+              style={{ background: dashboardMode === 'ai-strategy' ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.2))' : undefined, borderColor: dashboardMode === 'ai-strategy' ? '#6366f1' : undefined }}
+            >
+              🧠 AI Strategy
+            </button>
           </div>
 
           {dashboardMode === 'screener' ? (
@@ -871,6 +901,14 @@ function App() {
                   >
                     GMMA ({results.gmma_alerts.length})
                   </button>
+                  {results.gmma_all && results.gmma_all.length > 0 && (
+                    <button 
+                      className={`tab-btn ${activeTab === 'gmma_all' ? 'active gmma-active' : ''}`}
+                      onClick={() => setActiveTab('gmma_all')}
+                    >
+                      GMMA (all) ({results.gmma_all.length})
+                    </button>
+                  )}
                 </div>
 
                 {/* Alert List Table */}
@@ -954,7 +992,7 @@ function App() {
                       </table>
                     </div>
                   )
-                ) : (
+                ) : activeTab === 'gmma' ? (
                   /* GMMA Tab */
                   (results.gmma_alerts ?? []).length === 0 ? (
                     <div className="empty-state">
@@ -1004,6 +1042,63 @@ function App() {
                       </table>
                     </div>
                   )
+                ) : (
+                  /* GMMA (all) Tab */
+                  (results.gmma_all ?? []).length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">〽️</div>
+                      <h4>No Tickers Found</h4>
+                      <p>No custom watchlist tickers found or no scan has been performed yet.</p>
+                    </div>
+                  ) : (
+                    <div className="table-wrapper">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Symbol</th>
+                            <th>Price</th>
+                            <th>Signal</th>
+                            <th>Sep%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(results.gmma_all ?? []).map((alert) => (
+                            <tr 
+                              key={alert.ticker}
+                              className={selectedTicker === alert.ticker ? 'selected' : ''}
+                              onClick={() => handleSelectStock(alert.ticker, alert)}
+                            >
+                              <td className="ticker-cell">
+                                <div className="ticker-symbol">{alert.ticker}</div>
+                                {alert.name && <div className="ticker-name">{alert.name}</div>}
+                              </td>
+                              <td>${alert.close.toFixed(2)}</td>
+                              <td style={{ fontSize: '11px' }}>
+                                {alert.had_recent_crossover && (
+                                  <span className="gmma-badge gmma-badge-crossover" title={`Crossed ${alert.crossover_days_ago}d ago`}>
+                                    ✦ X-over
+                                  </span>
+                                )}
+                                {alert.is_bullish_aligned && (
+                                  <span className="gmma-badge gmma-badge-aligned" title="Short group above long group">
+                                    ▲ Aligned
+                                  </span>
+                                )}
+                                {!alert.is_bullish_aligned && !alert.had_recent_crossover && (
+                                  <span className="gmma-badge gmma-badge-bearish" title="Short group below long group">
+                                    ▼ Bearish
+                                  </span>
+                                )}
+                              </td>
+                              <td className={alert.separation_pct >= 0 ? 'metric-positive' : 'metric-negative'}>
+                                {alert.separation_pct.toFixed(1)}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
                 )}
               </div>
             </div>
@@ -1012,8 +1107,8 @@ function App() {
             <div className="right-chart-panel">
               {selectedTicker ? (
                 <div className="chart-panel-container">
-                  {/* GMMA Detail Card — only shown when selectedAlertDetails is a real GMMA alert */}
-                  {activeTab === 'gmma' && selectedAlertDetails && 'short_ema_values' in selectedAlertDetails && (
+                  {/* GMMA Detail Card — shown on both GMMA and GMMA (all) tabs when selectedAlertDetails is a real GMMA alert */}
+                  {(activeTab === 'gmma' || activeTab === 'gmma_all') && selectedAlertDetails && 'short_ema_values' in selectedAlertDetails && (
                     <div className="glass-panel gmma-detail-card">
                       <div className="gmma-detail-top-row">
                         <div className="gmma-detail-header">
@@ -1037,7 +1132,7 @@ function App() {
                           </div>
                           <div className="gmma-detail-item">
                             <span className="gmma-detail-label">Group Sep.</span>
-                            <span className="gmma-detail-value metric-positive">
+                            <span className={`gmma-detail-value ${selectedAlertDetails.separation_pct >= 0 ? 'metric-positive' : 'metric-negative'}`}>
                               {selectedAlertDetails.separation_pct?.toFixed(2) ?? '—'}%
                             </span>
                           </div>
@@ -1137,6 +1232,8 @@ function App() {
             />
           ) : dashboardMode === 'news' ? (
             <NewsPanel theme={theme} />
+          ) : dashboardMode === 'ai-strategy' ? (
+            <AIStrategyProposal theme={theme} />
           ) : (
             <AIChatbot theme={theme} />
           )}

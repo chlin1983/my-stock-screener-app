@@ -189,16 +189,23 @@ def get_latest_scan(universe: Optional[str] = None):
                 if "name" not in a:
                     needs_enrichment = True
                     break
+        if not needs_enrichment:
+            for a in data.get("gmma_all", []):
+                if "name" not in a:
+                    needs_enrichment = True
+                    break
                     
         if needs_enrichment:
             print(f"Enriching {filename} scan results with company names...")
             ma20_alerts = data.get("ma20_alerts", [])
             vcp_alerts = data.get("vcp_alerts", [])
             gmma_alerts = data.get("gmma_alerts", [])
+            gmma_all = data.get("gmma_all", [])
             unique_tickers = list(set(
                 [a["ticker"] for a in ma20_alerts] +
                 [a["ticker"] for a in vcp_alerts] +
-                [a["ticker"] for a in gmma_alerts]
+                [a["ticker"] for a in gmma_alerts] +
+                [a["ticker"] for a in gmma_all]
             ))
             
             ticker_names = {}
@@ -217,13 +224,18 @@ def get_latest_scan(universe: Optional[str] = None):
             for a in gmma_alerts:
                 if "name" not in a:
                     a["name"] = ticker_names.get(a["ticker"], a["ticker"])
+            for a in gmma_all:
+                if "name" not in a:
+                    a["name"] = ticker_names.get(a["ticker"], a["ticker"])
                     
             # Save enriched results back to file
             config.write_json(filename, data, indent=2)
                 
-        # Ensure gmma_alerts key always exists for older cached results
+        # Ensure gmma_alerts and gmma_all keys always exist for older cached results
         if "gmma_alerts" not in data:
             data["gmma_alerts"] = []
+        if "gmma_all" not in data:
+            data["gmma_all"] = []
                 
         return data
     except Exception as e:
@@ -963,6 +975,267 @@ def ai_chat(req: AIChatRequest):
     except Exception as e:
         print(f"Gemini API Error: {e}")
         raise HTTPException(status_code=500, detail=f"AI Chatbot Error: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI GMMA Strategy Proposal Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GMMAStrategyRequest(BaseModel):
+    min_price: float = 5.0
+    require_above_sma200: bool = True
+    min_volume_ratio: float = 0.8
+    min_separation_pct: float = 0.5
+    max_separation_pct: float = 30.0
+    require_crossover: bool = False
+    max_crossover_days: int = 10
+    max_ema3_to_ema60_ratio: float = 20.0
+    top_n: int = 5
+
+
+def _compute_sma(close_list: list, period: int) -> float:
+    if len(close_list) < period:
+        return 0.0
+    return sum(close_list[-period:]) / period
+
+
+def _compute_atr(high_list: list, low_list: list, close_list: list, period: int = 14) -> float:
+    if len(close_list) < period + 1:
+        return 0.0
+    trs = []
+    for i in range(-period, 0):
+        h = high_list[i]
+        l = low_list[i]
+        pc = close_list[i - 1]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    return sum(trs) / len(trs)
+
+
+def _compute_vol_ratio(volume_list: list) -> float:
+    if len(volume_list) < 51:
+        return 0.0
+    avg_50 = sum(volume_list[-51:-1]) / 50
+    return (volume_list[-1] / avg_50) if avg_50 > 0 else 0.0
+
+
+@app.post("/ai/strategy/gmma-proposal")
+def gmma_strategy_proposal(req: GMMAStrategyRequest):
+    """
+    Multi-layer GMMA tightening filter + AI narrative investment proposal.
+    Computes: SMA200 trend, volume expansion, ATR-based entry/stop/target, Bet Score.
+    """
+    import datetime as dt_mod
+
+    gmma_alerts = []
+    if config.json_exists("scan_results.json"):
+        try:
+            data = config.read_json("scan_results.json")
+            gmma_alerts = data.get("gmma_alerts", [])
+        except Exception:
+            pass
+
+    if not gmma_alerts:
+        return {
+            "candidates": [],
+            "ai_proposal": "No GMMA alerts found. Please run a scan first from the Screener Dashboard.",
+            "filter_params": req.dict(),
+            "generated_at": dt_mod.datetime.now().isoformat(),
+            "mode": "rule_based"
+        }
+
+    holdings_data, cash_balance = [], 15400.0
+    try:
+        if config.json_exists("portfolio_config.json"):
+            pcfg = config.read_json("portfolio_config.json")
+            holdings_data = pcfg.get("holdings", [])
+            cash_balance = pcfg.get("cash_balance", 15400.0)
+    except Exception:
+        pass
+    total_portfolio_value = cash_balance + sum(h.get("qty", 0) * h.get("avg_cost", 0) for h in holdings_data)
+
+    enriched = []
+    for alert in gmma_alerts:
+        ticker = alert.get("ticker", "")
+        close  = alert.get("close", 0.0)
+        if close < req.min_price:
+            continue
+        crossover_days_ago = alert.get("crossover_days_ago", None)
+        if req.require_crossover:
+            if crossover_days_ago is None or crossover_days_ago > req.max_crossover_days:
+                continue
+        sep_pct = alert.get("separation_pct", 0.0)
+        if sep_pct < req.min_separation_pct or sep_pct > req.max_separation_pct:
+            continue
+        cache_key = f"stocks/{ticker}.json"
+        if not config.json_exists(cache_key):
+            continue
+        try:
+            hist = config.read_json(cache_key)
+        except Exception:
+            continue
+        close_list  = [float(v) for v in hist.get("close", [])  if v is not None]
+        high_list   = [float(v) for v in hist.get("high", [])   if v is not None]
+        low_list    = [float(v) for v in hist.get("low", [])    if v is not None]
+        volume_list = [float(v) for v in hist.get("volume", []) if v is not None]
+        if len(close_list) < 210:
+            continue
+        sma200 = _compute_sma(close_list, 200)
+        sma200_distance_pct = ((close - sma200) / sma200 * 100) if sma200 > 0 else -999.0
+        if req.require_above_sma200 and sma200_distance_pct <= 0:
+            continue
+        vol_ratio = _compute_vol_ratio(volume_list)
+        if vol_ratio < req.min_volume_ratio:
+            continue
+        short_emas = alert.get("short_ema_values", {})
+        long_emas  = alert.get("long_ema_values", {})
+        ema3  = float(short_emas.get("3",  close))
+        ema60 = float(long_emas.get("60", close))
+        ema3_to_ema60_ratio = ((ema3 - ema60) / ema60 * 100) if ema60 > 0 else 999.0
+        if ema3_to_ema60_ratio > req.max_ema3_to_ema60_ratio:
+            continue
+        atr = _compute_atr(high_list, low_list, close_list, 14)
+        if atr <= 0:
+            atr = close * 0.015
+        ema30 = float(long_emas.get("30", close * 0.95))
+        entry_zone_low  = round(close * 0.998, 2)
+        entry_zone_high = round(close + atr * 0.3, 2)
+        stop_loss       = round(ema30 - atr * 1.0, 2)
+        risk_per_share  = max(entry_zone_low - stop_loss, atr * 0.5)
+        target_1        = round(entry_zone_low + risk_per_share * 2.0, 2)
+        target_2        = round(entry_zone_low + risk_per_share * 3.5, 2)
+        risk_reward     = round((target_1 - entry_zone_low) / risk_per_share, 2) if risk_per_share > 0 else 0.0
+        risk_dollars      = total_portfolio_value * 0.02
+        shares_for_2pct   = int(risk_dollars / risk_per_share) if risk_per_share > 0 else 0
+        position_size_pct = round((shares_for_2pct * entry_zone_low / total_portfolio_value * 100), 1) if total_portfolio_value > 0 else 0.0
+        score = 0.0
+        if 5 <= sma200_distance_pct <= 50:
+            score += min(25, sma200_distance_pct * 0.5)
+        elif sma200_distance_pct > 0:
+            score += 10
+        score += min(20, (vol_ratio - 1.0) * 20)
+        if 2 <= sep_pct <= 10:
+            score += 20
+        elif 10 < sep_pct <= 20:
+            score += max(0, 20 - (sep_pct - 10) * 2)
+        score += max(0, 20 - ema3_to_ema60_ratio)
+        if crossover_days_ago is not None:
+            score += max(0, 15 - crossover_days_ago)
+        bet_score = round(min(100, max(0, score)))
+        conviction = "VERY HIGH" if bet_score >= 75 else ("HIGH" if bet_score >= 55 else "MODERATE")
+        enriched.append({
+            "ticker": ticker, "name": alert.get("name", ticker),
+            "close": close, "separation_pct": sep_pct,
+            "volume_ratio": round(vol_ratio, 2),
+            "sma200_distance_pct": round(sma200_distance_pct, 1),
+            "crossover_days_ago": crossover_days_ago,
+            "ema3_to_ema60_ratio": round(ema3_to_ema60_ratio, 2),
+            "bet_score": bet_score, "entry_zone_low": entry_zone_low,
+            "entry_zone_high": entry_zone_high, "stop_loss": stop_loss,
+            "target_1": target_1, "target_2": target_2,
+            "risk_reward": risk_reward, "position_size_pct": position_size_pct,
+            "conviction": conviction,
+        })
+
+    enriched.sort(key=lambda x: x["bet_score"], reverse=True)
+    top_candidates = enriched[:req.top_n]
+
+    now_str = dt_mod.datetime.now().strftime("%Y-%m-%d %H:%M")
+    holdings_str = "\n".join(
+        f"- {h['ticker']}: {h.get('qty')} shares @ avg ${h.get('avg_cost', 0):.2f}"
+        for h in holdings_data
+    ) or "None"
+    candidates_str = ""
+    for i, c in enumerate(top_candidates, 1):
+        risk_pct = (c["entry_zone_low"] - c["stop_loss"]) / c["entry_zone_low"] * 100
+        candidates_str += (
+            f"\n### #{i}: {c['ticker']} ({c['name']}) - Bet Score: {c['bet_score']}/100\n"
+            f"- Price: ${c['close']:.2f} | Entry: ${c['entry_zone_low']:.2f}-${c['entry_zone_high']:.2f}\n"
+            f"- Stop Loss: ${c['stop_loss']:.2f} (Risk: ~{risk_pct:.1f}%)\n"
+            f"- Target 1 (1:2): ${c['target_1']:.2f} | Target 2 (1:3.5): ${c['target_2']:.2f}\n"
+            f"- Sep: {c['separation_pct']}% | Vol: {c['volume_ratio']}x | SMA200: {c['sma200_distance_pct']:+.1f}%\n"
+            f"- Conviction: {c['conviction']}\n"
+        )
+
+    mode = "rule_based"
+    ai_text = ""
+    if HAS_GENAI and config.GEMINI_API_KEY and top_candidates:
+        system_prompt = (
+            "You are Antigravity Strategist, an elite technical trading advisor specialising in the "
+            "Guppy Multiple Moving Average (GMMA) system. Produce precise, actionable investment proposals "
+            "focused on capital preservation and asymmetric returns. Guide the user through exact entry rules, "
+            "stop management, and scaling-out targets. Be concise, professional, and well structured in markdown."
+        )
+        user_prompt = (
+            f"Date: {now_str}\n"
+            f"Portfolio: Cash=${cash_balance:,.0f} | Total~=${total_portfolio_value:,.0f}\n"
+            f"Current Holdings:\n{holdings_str}\n\n---\n\n"
+            f"Top-{len(top_candidates)} GMMA candidates (SMA200 above, vol>={req.min_volume_ratio}x, "
+            f"sep {req.min_separation_pct}-{req.max_separation_pct}%, tightness<={req.max_ema3_to_ema60_ratio}%):\n"
+            f"{candidates_str}\n\n"
+            "Produce a complete investment strategy proposal covering:\n"
+            "1. Market Context: brief GMMA market read\n"
+            "2. Best Bet: #1 recommended trade with full rationale\n"
+            "3. Entry Playbook: exactly how/when to enter (pullback to EMA8, breakout trigger etc.)\n"
+            "4. Stop Loss Management: placement and trailing rules\n"
+            "5. Profit Taking: when to take 50% at T1, let T2 ride with trailing stop\n"
+            "6. Position Sizing: based on 2% risk rule\n"
+            "7. Risk Warnings: concentration or macro risks\n"
+            "8. Watchlist: rank remaining candidates for next entry\n\n"
+            "End with a disclaimer that this is educational only, not official financial advice."
+        )
+        try:
+            model = genai.GenerativeModel('gemini-3.5-flash', system_instruction=system_prompt)
+            response = model.generate_content(user_prompt)
+            ai_text = response.text.strip()
+            mode = "ai"
+        except Exception as e:
+            print(f"Gemini Strategy API Error: {e}")
+
+    if not ai_text:
+        if not top_candidates:
+            ai_text = (
+                "## No High-Probability Candidates Found\n\n"
+                "None of the current GMMA alerts passed all tightening criteria. Consider:\n"
+                "- Relaxing Min Volume Ratio (try 0.8x)\n"
+                "- Widening Separation % range\n"
+                "- Disabling Require Crossover filter\n"
+                "- Running a new scan to refresh data\n\n"
+                "No trade is always the best trade when high-conviction setups are absent."
+            )
+        else:
+            best = top_candidates[0]
+            risk = round(best["entry_zone_low"] - best["stop_loss"], 2)
+            ai_text = (
+                f"## Best Bet: {best['ticker']} ({best['name']})\n\n"
+                f"**Bet Score:** {best['bet_score']}/100 | **Conviction:** {best['conviction']}\n\n"
+                f"### Entry Playbook\n"
+                f"- Enter in the zone **${best['entry_zone_low']:.2f} to ${best['entry_zone_high']:.2f}**\n"
+                f"- Ideal: price consolidates tight near current level, then shows a strong close above ${best['entry_zone_high']:.2f}\n"
+                f"- Avoid chasing if price gaps more than 1 ATR above entry zone\n\n"
+                f"### Stop Loss Management\n"
+                f"- Hard stop at **${best['stop_loss']:.2f}** (1 ATR below EMA30 investor group)\n"
+                f"- Once price reaches Target 1, move stop to breakeven\n\n"
+                f"### Profit Taking Rules\n"
+                f"- Target 1: Sell 50% at **${best['target_1']:.2f}** (1:2 R/R) - move stop to breakeven\n"
+                f"- Target 2: Let 50% ride to **${best['target_2']:.2f}** (1:3.5 R/R) - trail using EMA15\n\n"
+                f"### Position Sizing\n"
+                f"- Risk per share: ${risk:.2f}\n"
+                f"- Suggested: **{best['position_size_pct']}% of portfolio** (2% max risk rule)\n\n"
+                f"### Watchlist\n"
+                + "\n".join(
+                    f"- **{c['ticker']}**: Score {c['bet_score']}/100 | Entry ${c['entry_zone_low']:.2f}-${c['entry_zone_high']:.2f} | SL ${c['stop_loss']:.2f} | T1 ${c['target_1']:.2f}"
+                    for c in top_candidates[1:]
+                ) +
+                "\n\n---\nDisclaimer: Educational/informational only. Not official financial advice."
+            )
+
+    return {
+        "candidates": top_candidates,
+        "ai_proposal": ai_text,
+        "filter_params": req.dict(),
+        "generated_at": dt_mod.datetime.now().isoformat(),
+        "mode": mode
+    }
 
 
 # News Scraping Cache

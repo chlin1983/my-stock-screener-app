@@ -983,16 +983,19 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA20 color"
               />
-              <label htmlFor="checkbox-ma20" style={{ cursor: 'pointer' }}>MA</label>
-              <input
-                type="number"
-                min="1"
-                max="500"
-                value={ma20Period}
-                onChange={(e) => handlePeriodChange('MA20', parseInt(e.target.value) || 20)}
-                className="legend-period-input"
-                title="Change MA20 period"
-              />
+              <span className="legend-ma-wrapper">
+                <label htmlFor="checkbox-ma20" style={{ cursor: 'pointer' }}>MA</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={ma20Period}
+                  onChange={(e) => handlePeriodChange('MA20', parseInt(e.target.value) || 20)}
+                  className="legend-period-input"
+                  title="Change MA20 period"
+                  style={{ width: `${String(ma20Period).length}ch` }}
+                />
+              </span>
             </span>
             <span className={`legend-item ${showMA50 ? 'active' : 'inactive'}`}>
               <input
@@ -1009,16 +1012,19 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA50 color"
               />
-              <label htmlFor="checkbox-ma50" style={{ cursor: 'pointer' }}>MA</label>
-              <input
-                type="number"
-                min="1"
-                max="500"
-                value={ma50Period}
-                onChange={(e) => handlePeriodChange('MA50', parseInt(e.target.value) || 50)}
-                className="legend-period-input"
-                title="Change MA50 period"
-              />
+              <span className="legend-ma-wrapper">
+                <label htmlFor="checkbox-ma50" style={{ cursor: 'pointer' }}>MA</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={ma50Period}
+                  onChange={(e) => handlePeriodChange('MA50', parseInt(e.target.value) || 50)}
+                  className="legend-period-input"
+                  title="Change MA50 period"
+                  style={{ width: `${String(ma50Period).length}ch` }}
+                />
+              </span>
             </span>
             <span className={`legend-item ${showMA150 ? 'active' : 'inactive'}`}>
               <input
@@ -1035,16 +1041,19 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA150 color"
               />
-              <label htmlFor="checkbox-ma150" style={{ cursor: 'pointer' }}>MA</label>
-              <input
-                type="number"
-                min="1"
-                max="500"
-                value={ma150Period}
-                onChange={(e) => handlePeriodChange('MA150', parseInt(e.target.value) || 150)}
-                className="legend-period-input"
-                title="Change MA150 period"
-              />
+              <span className="legend-ma-wrapper">
+                <label htmlFor="checkbox-ma150" style={{ cursor: 'pointer' }}>MA</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={ma150Period}
+                  onChange={(e) => handlePeriodChange('MA150', parseInt(e.target.value) || 150)}
+                  className="legend-period-input"
+                  title="Change MA150 period"
+                  style={{ width: `${String(ma150Period).length}ch` }}
+                />
+              </span>
             </span>
             <span className={`legend-item ${showMA200 ? 'active' : 'inactive'}`}>
               <input
@@ -1061,16 +1070,19 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 className="legend-color-picker"
                 title="Change MA200 color"
               />
-              <label htmlFor="checkbox-ma200" style={{ cursor: 'pointer' }}>MA</label>
-              <input
-                type="number"
-                min="1"
-                max="500"
-                value={ma200Period}
-                onChange={(e) => handlePeriodChange('MA200', parseInt(e.target.value) || 200)}
-                className="legend-period-input"
-                title="Change MA200 period"
-              />
+              <span className="legend-ma-wrapper">
+                <label htmlFor="checkbox-ma200" style={{ cursor: 'pointer' }}>MA</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={ma200Period}
+                  onChange={(e) => handlePeriodChange('MA200', parseInt(e.target.value) || 200)}
+                  className="legend-period-input"
+                  title="Change MA200 period"
+                  style={{ width: `${String(ma200Period).length}ch` }}
+                />
+              </span>
             </span>
             {/* GMMA Toggle Button */}
             <button
