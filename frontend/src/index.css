@@ -1163,6 +1163,19 @@ tr.selected td {
   border-color: rgba(99, 102, 241, 0.35);
 }
 
+.watchlist-row.dragging {
+  opacity: 0.4;
+  border: 1px dashed rgba(99, 102, 241, 0.5) !important;
+  background: var(--glass-highlight) !important;
+}
+
+.watchlist-row.drag-over {
+  border: 1px solid rgb(99, 102, 241) !important;
+  background: rgba(99, 102, 241, 0.08) !important;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.25);
+  transform: scale(1.01);
+}
+
 .wl-emoji {
   font-size: 15px;
   flex-shrink: 0;

@@ -33,6 +33,47 @@ export const WatchlistManager: React.FC<WatchlistManagerProps> = ({
   const [tickerError,    setTickerError]    = useState('');
   const addInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Drag and Drop state ─────────────────────────────────────────────
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) return;
+
+    const updated = [...watchlists];
+    const [removed] = updated.splice(draggedIndex, 1);
+    updated.splice(targetIndex, 0, removed);
+
+    onWatchlistsChange(updated);
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   const activeWatchlist = watchlists.find(w => w.id === activeId) ?? watchlists[0];
 
   // Auto focus input when active watchlist changes
@@ -121,11 +162,18 @@ export const WatchlistManager: React.FC<WatchlistManagerProps> = ({
       <div className="wl-sidebar-categories">
         <h4 className="wl-pane-title">Watchlists</h4>
         <div className="watchlist-list">
-          {watchlists.map(wl => (
+          {watchlists.map((wl, index) => (
             <div
               key={wl.id}
-              className={`watchlist-row ${activeId === wl.id ? 'active' : ''}`}
+              className={`watchlist-row ${activeId === wl.id ? 'active' : ''} ${draggedIndex === index ? 'dragging' : ''} ${dragOverIndex === index && draggedIndex !== index ? 'drag-over' : ''}`}
               onClick={() => handleSelectWatchlist(wl.id)}
+              draggable={editingId !== wl.id}
+              onDragStart={(e) => handleDragStart(e, index)}
+              onDragOver={handleDragOver}
+              onDragEnter={(e) => handleDragEnter(e, index)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, index)}
+              onDragEnd={handleDragEnd}
             >
               {editingId === wl.id ? (
                 <div className="wl-edit-form" onClick={e => e.stopPropagation()}>
