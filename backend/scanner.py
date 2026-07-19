@@ -587,6 +587,15 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         if not tickers:
             # Fall back to Nasdaq 100 constituents if Wikipedia fails completely
             tickers = config.NASDAQ_100_FALLBACK
+    elif "all_index" in universe_lower or "allindex" in universe_lower:
+        print("Fetching All Index tickers (Dow Jones + Nasdaq 100 + S&P 500)...")
+        dow_t = get_dow30_tickers()
+        nas_t = get_nasdaq100_tickers()
+        sp_t  = get_sp500_tickers()
+        if not dow_t: dow_t = config.DOW_30_FALLBACK
+        if not nas_t: nas_t = config.NASDAQ_100_FALLBACK
+        if not sp_t:  sp_t = config.NASDAQ_100_FALLBACK
+        tickers = dow_t + nas_t + sp_t
     elif "all_usa" in universe_lower or "usa" in universe_lower:
         # Combine all three major US exchanges
         print("Fetching All USA tickers (NASDAQ + NYSE + AMEX)...")

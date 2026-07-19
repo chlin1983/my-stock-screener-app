@@ -164,10 +164,39 @@ function App() {
   });
 
   const [universeMode, setUniverseMode] = useState<
-    'watchlist' | 'dow30' | 'nasdaq100' | 'sp500' | 'nasdaq' | 'nyse' | 'amex' | 'all_usa'
+    'watchlist' | 'all_index' | 'dow30' | 'nasdaq100' | 'sp500' | 'nasdaq' | 'nyse' | 'amex' | 'all_usa'
   >('nasdaq100');
 
-  const activeWatchlist = watchlists.find(w => w.id === activeWatchlistId) ?? watchlists[0];
+  const activeWatchlist = activeWatchlistId === 'all'
+    ? {
+        id: 'all',
+        name: 'All Watchlists',
+        emoji: '📁',
+        tickers: Array.from(new Set(watchlists.flatMap(w => w.tickers || [])))
+      }
+    : (watchlists.find(w => w.id === activeWatchlistId) ?? watchlists[0]);
+
+  // Filtered results for custom watchlist mode
+  const isWatchlist = universeMode === 'watchlist';
+  
+  const getFilteredAlerts = <T extends { ticker: string }>(alerts: T[]): T[] => {
+    if (!isWatchlist) return alerts || [];
+    if (activeWatchlistId === 'all') return alerts || [];
+    const currentTickers = activeWatchlist?.tickers || [];
+    return (alerts || []).filter(a => currentTickers.includes(a.ticker));
+  };
+
+  const filteredMa20Alerts = getFilteredAlerts(results.ma20_alerts);
+  const filteredVcpAlerts = getFilteredAlerts(results.vcp_alerts);
+  const filteredGmmaAlerts = getFilteredAlerts(results.gmma_alerts);
+  const filteredGmmaAll = getFilteredAlerts(results.gmma_all ?? []);
+
+  const filteredScannedCount = isWatchlist
+    ? (activeWatchlistId === 'all'
+        ? Array.from(new Set(watchlists.flatMap(w => w.tickers || []))).length
+        : (activeWatchlist?.tickers?.length ?? 0))
+    : results.scanned_count;
+
 
   // Save watchlist states to localStorage when edited
   useEffect(() => {
@@ -217,11 +246,17 @@ function App() {
       if (data && !data.message) {
         setResults(data);
         
-        // Auto select first stock in current tab if exists
-        const alertsList = activeTab === 'ma20' ? data.ma20_alerts :
-                           activeTab === 'vcp'  ? data.vcp_alerts  :
-                           activeTab === 'gmma' ? (data.gmma_alerts ?? []) :
-                                                  (data.gmma_all ?? []);
+        // Auto select first stock in current tab if exists (filtered based on selected active watchlist)
+        const getFiltered = <T extends { ticker: string }>(alerts: T[]): T[] => {
+          if (target !== 'watchlist') return alerts || [];
+          if (activeWatchlistId === 'all') return alerts || [];
+          const currentTickers = activeWatchlist?.tickers || [];
+          return (alerts || []).filter(a => currentTickers.includes(a.ticker));
+        };
+        const alertsList = activeTab === 'ma20' ? getFiltered(data.ma20_alerts) :
+                           activeTab === 'vcp'  ? getFiltered(data.vcp_alerts)  :
+                           activeTab === 'gmma' ? getFiltered(data.gmma_alerts ?? []) :
+                                                  getFiltered(data.gmma_all ?? []);
         if (alertsList.length > 0) {
           handleSelectStock(alertsList[0].ticker, alertsList[0]);
         }
@@ -252,21 +287,24 @@ function App() {
     fetchLatestResults(universeMode);
   }, []);
 
-  // Update tab toggle behavior
+  // Update tab toggle and watchlist selection behavior
   useEffect(() => {
-    // Use ?? [] so an old cached scan without gmma_alerts never throws
-    const list = activeTab === 'ma20' ? results.ma20_alerts :
-                 activeTab === 'vcp'  ? results.vcp_alerts  :
-                 activeTab === 'gmma' ? (results.gmma_alerts ?? []) :
-                                        (results.gmma_all ?? []);
+    const list = activeTab === 'ma20' ? filteredMa20Alerts :
+                 activeTab === 'vcp'  ? filteredVcpAlerts  :
+                 activeTab === 'gmma' ? filteredGmmaAlerts :
+                                        filteredGmmaAll;
     if (list && list.length > 0) {
-      handleSelectStock(list[0].ticker, list[0]);
+      // Only reset selection if the current selected ticker is not in the filtered list
+      const found = list.some(alert => alert.ticker === selectedTicker);
+      if (!found) {
+        handleSelectStock(list[0].ticker, list[0]);
+      }
     } else {
       setSelectedTicker('');
       setHistory([]);
       setSelectedAlertDetails(null);
     }
-  }, [activeTab]);
+  }, [activeTab, activeWatchlistId, results]);
 
   // Keyboard navigation for stock list
   useEffect(() => {
@@ -279,10 +317,10 @@ function App() {
 
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
 
-      const list = activeTab === 'ma20' ? results.ma20_alerts :
-                   activeTab === 'vcp'  ? results.vcp_alerts  :
-                   activeTab === 'gmma' ? (results.gmma_alerts ?? []) :
-                                          (results.gmma_all ?? []);
+      const list = activeTab === 'ma20' ? filteredMa20Alerts :
+                   activeTab === 'vcp'  ? filteredVcpAlerts  :
+                   activeTab === 'gmma' ? filteredGmmaAlerts :
+                                          filteredGmmaAll;
 
       if (!list || list.length === 0) return;
 
@@ -304,7 +342,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, results, selectedTicker]);
+  }, [activeTab, filteredMa20Alerts, filteredVcpAlerts, filteredGmmaAlerts, filteredGmmaAll, selectedTicker]);
 
   // Auto-scroll selected row into view (only inside the scrollable table container, to prevent window jump)
   useEffect(() => {
@@ -381,10 +419,12 @@ function App() {
     let payload: Record<string, any>;
 
     if (universeMode === 'watchlist') {
-      // Scan the active custom watchlist
+      // Gather and deduplicate tickers from ALL custom watchlists
+      const allTickers = watchlists.flatMap(wl => wl.tickers || []);
+      const uniqueTickers = Array.from(new Set(allTickers));
       payload = {
         universe: 'custom',
-        custom_tickers: activeWatchlist?.tickers && activeWatchlist.tickers.length > 0 ? activeWatchlist.tickers : null,
+        custom_tickers: uniqueTickers.length > 0 ? uniqueTickers : null,
       };
     } else {
       // Scan standard universe
@@ -419,7 +459,7 @@ function App() {
       setStatus({
         is_running: true,
         last_completed: status.last_completed,
-        current_universe: universeMode === 'watchlist' ? (activeWatchlist?.name || 'Watchlist') : universeMode.toUpperCase(),
+        current_universe: universeMode === 'watchlist' ? 'ALL WATCHLISTS' : universeMode.toUpperCase(),
         error: null
       });
 
@@ -441,10 +481,16 @@ function App() {
             error: data.error || null
           });
           
-          const list = activeTab === 'ma20' ? data.ma20_alerts :
-                       activeTab === 'vcp'  ? data.vcp_alerts  :
-                       activeTab === 'gmma' ? (data.gmma_alerts ?? []) :
-                                              (data.gmma_all ?? []);
+          const currentTickers = activeWatchlist?.tickers || [];
+          const getFiltered = <T extends { ticker: string }>(alerts: T[]): T[] => {
+            if (universeMode !== 'watchlist') return alerts || [];
+            if (activeWatchlistId === 'all') return alerts || [];
+            return (alerts || []).filter(a => currentTickers.includes(a.ticker));
+          };
+          const list = activeTab === 'ma20' ? getFiltered(data.ma20_alerts) :
+                       activeTab === 'vcp'  ? getFiltered(data.vcp_alerts)  :
+                       activeTab === 'gmma' ? getFiltered(data.gmma_alerts ?? []) :
+                                              getFiltered(data.gmma_all ?? []);
           if (list && list.length > 0) {
             handleSelectStock(list[0].ticker, list[0]);
           }
@@ -552,13 +598,14 @@ function App() {
                       }}
                     >
                       <option value="watchlist">📋 Custom Watchlist</option>
+                      <option value="all_index">🇺🇸 All Index (Dow Jones 30 + Nasdaq 100 + S&P 500)</option>
+                      <option value="all_usa">🇺🇸 All USA (NASDAQ + NYSE + AMEX)</option>
                       <option value="dow30">🇺🇸 Dow Jones 30</option>
                       <option value="nasdaq100">🇺🇸 Nasdaq 100</option>
                       <option value="sp500">🇺🇸 S&P 500</option>
                       <option value="nasdaq">🇺🇸 Full NASDAQ Exchange</option>
                       <option value="nyse">🇺🇸 Full NYSE Exchange</option>
                       <option value="amex">🇺🇸 AMEX Exchange</option>
-                      <option value="all_usa">🇺🇸 All USA (NASDAQ+NYSE+AMEX)</option>
                     </select>
                   </div>
 
@@ -570,6 +617,7 @@ function App() {
                           value={activeWatchlistId} 
                           onChange={(e) => setActiveWatchlistId(e.target.value)}
                         >
+                          <option value="all">📁 All Watchlists</option>
                           {watchlists.map(wl => (
                             <option key={wl.id} value={wl.id}>
                               {wl.emoji} {wl.name}
@@ -588,6 +636,7 @@ function App() {
                   ) : (
                     <div className="all-usa-info">
                       <div className="all-usa-badge">
+                        {universeMode === 'all_index' && 'All Index (~630 stocks)'}
                         {universeMode === 'dow30' && 'Dow Jones 30 (~30 stocks)'}
                         {universeMode === 'nasdaq100' && 'Nasdaq 100 (~100 stocks)'}
                         {universeMode === 'sp500' && 'S&P 500 (~500 stocks)'}
@@ -597,6 +646,7 @@ function App() {
                         {universeMode === 'all_usa' && 'NASDAQ + NYSE + AMEX (~8,000 stocks)'}
                       </div>
                       <p className="all-usa-desc">
+                        {universeMode === 'all_index' && 'Moderate scan (~4-6 minutes).'}
                         {universeMode === 'dow30' && 'Very fast scan (~30 seconds).'}
                         {universeMode === 'nasdaq100' && 'Fast scan (~1-2 minutes).'}
                         {universeMode === 'sp500' && 'Moderate scan (~3-5 minutes).'}
@@ -720,7 +770,7 @@ function App() {
               /* Dedicated Watchlist Manager tab in sidebar */
               <WatchlistManager 
                 watchlists={watchlists}
-                activeId={activeWatchlistId}
+                activeId={activeWatchlistId === 'all' ? (watchlists[0]?.id || '') : activeWatchlistId}
                 onWatchlistsChange={setWatchlists}
                 onActiveIdChange={setActiveWatchlistId}
               />
@@ -857,22 +907,22 @@ function App() {
           <div className="summary-grid">
             <div className="glass-panel card card-blue">
               <div className="card-title">Stocks Scanned</div>
-              <div className="card-value">{results.scanned_count}</div>
+              <div className="card-value">{filteredScannedCount}</div>
               <div className="card-desc">Active tickers in selected universe</div>
             </div>
             <div className="glass-panel card card-amber">
               <div className="card-title">MA20 Pullback Alerts</div>
-              <div className="card-value">{results.ma20_alerts.length}</div>
+              <div className="card-value">{filteredMa20Alerts.length}</div>
               <div className="card-desc">Touching MA20 support in uptrend</div>
             </div>
             <div className="glass-panel card card-purple">
               <div className="card-title">VCP Pattern Alerts</div>
-              <div className="card-value">{results.vcp_alerts.length}</div>
+              <div className="card-value">{filteredVcpAlerts.length}</div>
               <div className="card-desc">Volatility contractions &amp; dry-up</div>
             </div>
             <div className="glass-panel card card-teal">
               <div className="card-title">GMMA Alerts</div>
-              <div className="card-value">{results.gmma_alerts.length}</div>
+              <div className="card-value">{filteredGmmaAlerts.length}</div>
               <div className="card-desc">Guppy EMA group crossovers</div>
             </div>
           </div>
@@ -887,33 +937,33 @@ function App() {
                     className={`tab-btn ${activeTab === 'ma20' ? 'active' : ''}`}
                     onClick={() => setActiveTab('ma20')}
                   >
-                    MA20 Alerts ({results.ma20_alerts.length})
+                    MA20 Alerts ({filteredMa20Alerts.length})
                   </button>
                   <button 
                     className={`tab-btn ${activeTab === 'vcp' ? 'active' : ''}`}
                     onClick={() => setActiveTab('vcp')}
                   >
-                    VCP Alerts ({results.vcp_alerts.length})
+                    VCP Alerts ({filteredVcpAlerts.length})
                   </button>
                   <button 
                     className={`tab-btn ${activeTab === 'gmma' ? 'active gmma-active' : ''}`}
                     onClick={() => setActiveTab('gmma')}
                   >
-                    GMMA ({results.gmma_alerts.length})
+                    GMMA ({filteredGmmaAlerts.length})
                   </button>
-                  {results.gmma_all && results.gmma_all.length > 0 && (
+                  {filteredGmmaAll && filteredGmmaAll.length > 0 && (
                     <button 
                       className={`tab-btn ${activeTab === 'gmma_all' ? 'active gmma-active' : ''}`}
                       onClick={() => setActiveTab('gmma_all')}
                     >
-                      GMMA (all) ({results.gmma_all.length})
+                      GMMA (all) ({filteredGmmaAll.length})
                     </button>
                   )}
                 </div>
 
                 {/* Alert List Table */}
                 {activeTab === 'ma20' ? (
-                  results.ma20_alerts.length === 0 ? (
+                  filteredMa20Alerts.length === 0 ? (
                     <div className="empty-state">
                       <div className="empty-state-icon">🔔</div>
                       <h4>No MA20 Pullbacks Found</h4>
@@ -931,7 +981,7 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {results.ma20_alerts.map((alert) => (
+                          {filteredMa20Alerts.map((alert) => (
                             <tr 
                               key={alert.ticker}
                               className={selectedTicker === alert.ticker ? 'selected' : ''}
@@ -953,7 +1003,7 @@ function App() {
                     </div>
                   )
                 ) : activeTab === 'vcp' ? (
-                  results.vcp_alerts.length === 0 ? (
+                  filteredVcpAlerts.length === 0 ? (
                     <div className="empty-state">
                       <div className="empty-state-icon">📈</div>
                       <h4>No VCP Setups Found</h4>
@@ -971,7 +1021,7 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {results.vcp_alerts.map((alert) => (
+                          {filteredVcpAlerts.map((alert) => (
                             <tr 
                               key={alert.ticker}
                               className={selectedTicker === alert.ticker ? 'selected' : ''}
@@ -994,7 +1044,7 @@ function App() {
                   )
                 ) : activeTab === 'gmma' ? (
                   /* GMMA Tab */
-                  (results.gmma_alerts ?? []).length === 0 ? (
+                  filteredGmmaAlerts.length === 0 ? (
                     <div className="empty-state">
                       <div className="empty-state-icon">〽️</div>
                       <h4>No GMMA Signals Found</h4>
@@ -1012,7 +1062,7 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {(results.gmma_alerts ?? []).map((alert) => (
+                          {filteredGmmaAlerts.map((alert) => (
                             <tr 
                               key={alert.ticker}
                               className={selectedTicker === alert.ticker ? 'selected' : ''}
@@ -1044,7 +1094,7 @@ function App() {
                   )
                 ) : (
                   /* GMMA (all) Tab */
-                  (results.gmma_all ?? []).length === 0 ? (
+                  filteredGmmaAll.length === 0 ? (
                     <div className="empty-state">
                       <div className="empty-state-icon">〽️</div>
                       <h4>No Tickers Found</h4>
@@ -1062,7 +1112,7 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {(results.gmma_all ?? []).map((alert) => (
+                          {filteredGmmaAll.map((alert) => (
                             <tr 
                               key={alert.ticker}
                               className={selectedTicker === alert.ticker ? 'selected' : ''}
