@@ -198,9 +198,39 @@ function App() {
     : results.scanned_count;
 
 
-  // Save watchlist states to localStorage when edited
+  // Fetch watchlists from backend on mount
+  useEffect(() => {
+    const loadWatchlists = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/watchlists`);
+        if (!res.ok) throw new Error("Failed to load");
+        const data = await res.json();
+        if (data && Array.isArray(data.watchlists) && data.watchlists.length > 0) {
+          setWatchlists(data.watchlists);
+        }
+      } catch (e) {
+        console.error("Failed to load watchlists from backend, using local/defaults:", e);
+      }
+    };
+    loadWatchlists();
+  }, []);
+
+  // Save watchlist states to localStorage and backend when edited
   useEffect(() => {
     localStorage.setItem('ag_watchlists', JSON.stringify(watchlists));
+
+    const syncWatchlists = async () => {
+      try {
+        await fetch(`${BACKEND_URL}/watchlists`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ watchlists })
+        });
+      } catch (e) {
+        console.error("Failed to sync watchlists to backend:", e);
+      }
+    };
+    syncWatchlists();
   }, [watchlists]);
 
   useEffect(() => {

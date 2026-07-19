@@ -71,6 +71,15 @@ class ScanRequest(BaseModel):
     gmma_crossover_lookback_days: Optional[int] = None
     gmma_min_separation_pct: Optional[float] = None
 
+class WatchlistTickerRequest(BaseModel):
+    id: str
+    name: str
+    emoji: str
+    tickers: List[str]
+
+class WatchlistsPayload(BaseModel):
+    watchlists: List[WatchlistTickerRequest]
+
 def execute_background_scan(req: ScanRequest):
     global scan_status
     scan_status["is_running"] = True
@@ -136,6 +145,27 @@ def read_root():
 @app.get("/scan/status")
 def get_scan_status():
     return scan_status
+
+WATCHLISTS_KEY = "custom_watchlists.json"
+
+@app.get("/watchlists")
+def get_watchlists():
+    if not config.json_exists(WATCHLISTS_KEY):
+        return {"watchlists": []}
+    try:
+        data = config.read_json(WATCHLISTS_KEY)
+        return {"watchlists": data.get("watchlists", [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/watchlists")
+def save_watchlists(req: WatchlistsPayload):
+    try:
+        watchlists_dict = [w.dict() for w in req.watchlists]
+        config.write_json(WATCHLISTS_KEY, {"watchlists": watchlists_dict})
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/scan/latest")
 def get_latest_scan(universe: Optional[str] = None):
