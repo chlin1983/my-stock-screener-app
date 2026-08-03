@@ -12,4 +12,9 @@ echo Both servers have been launched in separate windows!
 echo - Backend: http://127.0.0.1:8000
 echo - Frontend: http://localhost:5173/
 echo.
+
+:: Wait briefly to ensure the frontend server has started, then open the browser
+timeout /t 3 /nobreak > NUL
+start http://localhost:5173/
+
 pause

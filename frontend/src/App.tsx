@@ -9,6 +9,7 @@ import { AssetAllocationMap } from './components/AssetAllocationMap';
 import { AIChatbot } from './components/AIChatbot';
 import { NewsPanel } from './components/NewsPanel';
 import { AIStrategyProposal } from './components/AIStrategyProposal';
+import { EarningsCalendar } from './components/EarningsCalendar';
 
 interface MA20Alert {
 
@@ -87,7 +88,7 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [activeTab, setActiveTab] = useState<'ma20' | 'vcp' | 'gmma' | 'gmma_all'>('ma20');
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
-  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot' | 'news' | 'ai-strategy'>('screener');
+  const [dashboardMode, setDashboardMode] = useState<'screener' | 'portfolio' | 'assetmap' | 'tradelog' | 'chatbot' | 'news' | 'ai-strategy' | 'calendar'>('screener');
   const [portfolioRefreshTrigger, setPortfolioRefreshTrigger] = useState<number>(0);
   const [tradeLogRefreshTrigger, setTradeLogRefreshTrigger] = useState<number>(0);
 
@@ -165,7 +166,7 @@ function App() {
 
   const [universeMode, setUniverseMode] = useState<
     'watchlist' | 'all_index' | 'dow30' | 'nasdaq100' | 'sp500' | 'nasdaq' | 'nyse' | 'amex' | 'all_usa'
-  >('nasdaq100');
+  >('watchlist');
 
   const activeWatchlist = activeWatchlistId === 'all'
     ? {
@@ -207,6 +208,7 @@ function App() {
         const data = await res.json();
         if (data && Array.isArray(data.watchlists) && data.watchlists.length > 0) {
           setWatchlists(data.watchlists);
+          localStorage.setItem('ag_watchlists', JSON.stringify(data.watchlists));
         }
       } catch (e) {
         console.error("Failed to load watchlists from backend, using local/defaults:", e);
@@ -215,23 +217,21 @@ function App() {
     loadWatchlists();
   }, []);
 
-  // Save watchlist states to localStorage and backend when edited
-  useEffect(() => {
-    localStorage.setItem('ag_watchlists', JSON.stringify(watchlists));
-
-    const syncWatchlists = async () => {
-      try {
-        await fetch(`${BACKEND_URL}/watchlists`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ watchlists })
-        });
-      } catch (e) {
-        console.error("Failed to sync watchlists to backend:", e);
-      }
-    };
-    syncWatchlists();
-  }, [watchlists]);
+  // Handle explicit watchlist changes from the user
+  const handleWatchlistsChange = async (newWatchlists: any[]) => {
+    setWatchlists(newWatchlists);
+    localStorage.setItem('ag_watchlists', JSON.stringify(newWatchlists));
+    
+    try {
+      await fetch(`${BACKEND_URL}/watchlists`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watchlists: newWatchlists })
+      });
+    } catch (e) {
+      console.error("Failed to sync watchlists to backend:", e);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('ag_watchlist_active', activeWatchlistId);
@@ -655,13 +655,7 @@ function App() {
                           ))}
                         </select>
                       </div>
-                      <button 
-                        className="btn-dash-manage"
-                        onClick={() => setSettingsTab('watchlists')}
-                        style={{ marginTop: '8px', width: '100%' }}
-                      >
-                        ✏️ Edit Watchlist Tickers
-                      </button>
+
                     </div>
                   ) : (
                     <div className="all-usa-info">
@@ -801,8 +795,8 @@ function App() {
               <WatchlistManager 
                 watchlists={watchlists}
                 activeId={activeWatchlistId === 'all' ? (watchlists[0]?.id || '') : activeWatchlistId}
-                onWatchlistsChange={setWatchlists}
-                onActiveIdChange={setActiveWatchlistId}
+                onWatchlistsChange={handleWatchlistsChange}
+                onActiveIdChange={setActiveWatchlistId} 
               />
             )}
           </div>
@@ -928,6 +922,15 @@ function App() {
               style={{ background: dashboardMode === 'ai-strategy' ? 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.2))' : undefined, borderColor: dashboardMode === 'ai-strategy' ? '#6366f1' : undefined }}
             >
               🧠 AI Strategy
+            </button>
+            <button 
+              className={`dashboard-nav-tab ${dashboardMode === 'calendar' ? 'active' : ''}`}
+              onClick={() => {
+                setDashboardMode('calendar');
+                setShowSidebar(false);
+              }}
+            >
+              📅 Calendar
             </button>
           </div>
 
@@ -1187,9 +1190,29 @@ function App() {
             <div className="right-chart-panel">
               {selectedTicker ? (
                 <div className="chart-panel-container">
+
+
+                  <div style={{ position: 'relative' }}>
+                    {loadingHistory && (
+                      <div className="chart-loading-overlay">
+                        <div className="loading-spinner" style={{ width: '35px', height: '35px' }}></div>
+                      </div>
+                    )}
+                    {history.length > 0 && (
+                      <ChartPanel
+                        ticker={selectedTicker}
+                        candles={history}
+                        highlightDate={activeTab === 'ma20' ? history[history.length - 1]?.time : undefined}
+                        vcpContractions={activeTab === 'vcp' ? selectedAlertDetails?.contractions : undefined}
+                        gmmaData={gmmaChartData}
+                        theme={theme}
+                      />
+                    )}
+                  </div>
+                  
                   {/* GMMA Detail Card — shown on both GMMA and GMMA (all) tabs when selectedAlertDetails is a real GMMA alert */}
                   {(activeTab === 'gmma' || activeTab === 'gmma_all') && selectedAlertDetails && 'short_ema_values' in selectedAlertDetails && (
-                    <div className="glass-panel gmma-detail-card">
+                    <div className="glass-panel gmma-detail-card" style={{ marginTop: '16px' }}>
                       <div className="gmma-detail-top-row">
                         <div className="gmma-detail-header">
                           <span className="gmma-detail-ticker">{selectedAlertDetails.ticker}</span>
@@ -1249,24 +1272,6 @@ function App() {
                       </div>
                     </div>
                   )}
-
-                  <div style={{ position: 'relative' }}>
-                    {loadingHistory && (
-                      <div className="chart-loading-overlay">
-                        <div className="loading-spinner" style={{ width: '35px', height: '35px' }}></div>
-                      </div>
-                    )}
-                    {history.length > 0 && (
-                      <ChartPanel
-                        ticker={selectedTicker}
-                        candles={history}
-                        highlightDate={activeTab === 'ma20' ? history[history.length - 1]?.time : undefined}
-                        vcpContractions={activeTab === 'vcp' ? selectedAlertDetails?.contractions : undefined}
-                        gmmaData={gmmaChartData}
-                        theme={theme}
-                      />
-                    )}
-                  </div>
                 </div>
               ) : (
                 <div className="glass-panel empty-state" style={{ height: '400px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
@@ -1314,6 +1319,17 @@ function App() {
             <NewsPanel theme={theme} />
           ) : dashboardMode === 'ai-strategy' ? (
             <AIStrategyProposal theme={theme} />
+          ) : dashboardMode === 'calendar' ? (
+            <EarningsCalendar 
+              watchlists={watchlists} 
+              onSelectTicker={(ticker) => {
+                const allAlerts = [...results.ma20_alerts, ...results.vcp_alerts, ...(results.gmma_alerts ?? [])];
+                const matchingAlert = allAlerts.find(a => a.ticker === ticker);
+                handleSelectStock(ticker, matchingAlert || { ticker });
+                // Switch back to screener to show the chart
+                setDashboardMode('screener');
+              }} 
+            />
           ) : (
             <AIChatbot theme={theme} />
           )}

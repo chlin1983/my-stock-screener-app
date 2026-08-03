@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { ChartPanel } from './ChartPanel';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
@@ -34,6 +35,7 @@ interface Candidate {
   risk_reward: number;
   position_size_pct: number;
   conviction: 'VERY HIGH' | 'HIGH' | 'MODERATE';
+  failed_criteria?: string[];
 }
 
 interface ProposalResponse {
@@ -55,7 +57,7 @@ const DEFAULT_FILTERS: FilterParams = {
   require_crossover: false,
   max_crossover_days: 10,
   max_ema3_to_ema60_ratio: 20.0,
-  top_n: 5,
+  top_n: 10,
 };
 
 // ─── Conviction colour ────────────────────────────────────────────────────────
@@ -89,12 +91,77 @@ interface AIStrategyProposalProps {
   theme?: 'dark' | 'light';
 }
 
-export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = () => {
+export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = ({ theme = 'dark' }) => {
   const [filters, setFilters] = useState<FilterParams>(DEFAULT_FILTERS);
   const [loading, setLoading] = useState(false);
   const [proposal, setProposal] = useState<ProposalResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/ai/strategy/gmma-proposal/latest`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.generated_at) {
+          setProposal(data);
+          if (data.filter_params) {
+            setFilters(data.filter_params);
+          }
+        }
+      })
+      .catch(e => console.error("Failed to load latest proposal", e));
+  }, []);
+
+  useEffect(() => {
+    if (selectedCandidate) {
+      setLoadingHistory(true);
+      setHistoryError(null);
+      fetch(`${BACKEND_URL}/stock/${selectedCandidate.ticker.trim()}/history`)
+        .then(async res => {
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`HTTP ${res.status} ${text}`);
+          }
+          return res.json();
+        })
+        .then(data => {
+          if (data && data.dates && Array.isArray(data.dates)) {
+            const formatted = data.dates.map((date: string, i: number) => ({
+              time: date,
+              open: data.open[i],
+              high: data.high[i],
+              low: data.low[i],
+              close: data.close[i],
+              volume: data.volume[i],
+            })).filter((c: any) => c.time && c.close !== null && !isNaN(c.close));
+            
+            if (formatted.length > 0) {
+              setHistory(formatted);
+            } else {
+              setHistoryError("No valid candle data found.");
+              setHistory([]);
+            }
+          } else {
+            setHistoryError("Invalid data format from API.");
+            setHistory([]);
+          }
+        })
+        .catch(e => {
+          console.error('Failed to fetch history', e);
+          setHistoryError(e.message || e.toString());
+          setHistory([]);
+        })
+        .finally(() => {
+          setLoadingHistory(false);
+        });
+    } else {
+      setHistory([]);
+      setHistoryError(null);
+    }
+  }, [selectedCandidate]);
 
   const runProposal = useCallback(async () => {
     setLoading(true);
@@ -336,7 +403,12 @@ export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = () => {
                             >
                               <td style={{ padding: '9px 10px', color: 'var(--color-text-muted)', fontWeight: 700 }}>#{i + 1}</td>
                               <td style={{ padding: '9px 10px' }}>
-                                <div style={{ fontWeight: 700, fontSize: 13 }}>{c.ticker}</div>
+                                <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  {c.ticker}
+                                  {c.failed_criteria && c.failed_criteria.length > 0 && (
+                                    <span title={`Failed criteria:\n- ${c.failed_criteria.join('\n- ')}`} style={{ cursor: 'help', fontSize: 12 }}>⚠️</span>
+                                  )}
+                                </div>
                                 <div style={{ fontSize: 10.5, color: 'var(--color-text-dark)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
                               </td>
                               <td style={{ padding: '9px 10px', fontWeight: 600 }}>${c.close.toFixed(2)}</td>
@@ -415,6 +487,27 @@ export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = () => {
                     Place hard stop at <strong style={{ color: '#f43f5e' }}>${selectedCandidate.stop_loss.toFixed(2)}</strong> immediately.
                     At Target 1, sell 50% and move stop to breakeven.
                     Let the remaining 50% ride to Target 2 or trail the EMA15.
+                  </div>
+                  
+                  {/* Chart section */}
+                  <div style={{ minHeight: 520, borderTop: '1px solid var(--glass-border)', position: 'relative' }}>
+                    {loadingHistory ? (
+                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontSize: 13, background: 'rgba(0,0,0,0.1)' }}>
+                        <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite', marginRight: 8 }} />
+                        Loading GMMA Chart...
+                      </div>
+                    ) : history.length > 0 ? (
+                      <ChartPanel
+                        ticker={selectedCandidate.ticker}
+                        candles={history}
+                        gmmaData={{ showByDefault: true }}
+                        theme={theme}
+                      />
+                    ) : (
+                      <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        No chart data available. {historyError ? <><br/><span style={{ fontSize: 11, color: '#f43f5e' }}>{historyError}</span></> : ''}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -2,7 +2,7 @@ import os
 import json
 import uvicorn
 import asyncio
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -1048,6 +1048,12 @@ def _compute_vol_ratio(volume_list: list) -> float:
     return (volume_list[-1] / avg_50) if avg_50 > 0 else 0.0
 
 
+@app.get("/ai/strategy/gmma-proposal/latest")
+def get_latest_gmma_proposal():
+    if config.json_exists("gmma_proposal_latest.json"):
+        return config.read_json("gmma_proposal_latest.json")
+    return {"candidates": [], "ai_proposal": "", "filter_params": None, "generated_at": None, "mode": None}
+
 @app.post("/ai/strategy/gmma-proposal")
 def gmma_strategy_proposal(req: GMMAStrategyRequest):
     """
@@ -1087,15 +1093,9 @@ def gmma_strategy_proposal(req: GMMAStrategyRequest):
     for alert in gmma_alerts:
         ticker = alert.get("ticker", "")
         close  = alert.get("close", 0.0)
-        if close < req.min_price:
+        if close < 1.0:
             continue
-        crossover_days_ago = alert.get("crossover_days_ago", None)
-        if req.require_crossover:
-            if crossover_days_ago is None or crossover_days_ago > req.max_crossover_days:
-                continue
-        sep_pct = alert.get("separation_pct", 0.0)
-        if sep_pct < req.min_separation_pct or sep_pct > req.max_separation_pct:
-            continue
+            
         cache_key = f"stocks/{ticker}.json"
         if not config.json_exists(cache_key):
             continue
@@ -1103,26 +1103,59 @@ def gmma_strategy_proposal(req: GMMAStrategyRequest):
             hist = config.read_json(cache_key)
         except Exception:
             continue
+            
         close_list  = [float(v) for v in hist.get("close", [])  if v is not None]
         high_list   = [float(v) for v in hist.get("high", [])   if v is not None]
         low_list    = [float(v) for v in hist.get("low", [])    if v is not None]
         volume_list = [float(v) for v in hist.get("volume", []) if v is not None]
         if len(close_list) < 210:
             continue
+            
+        crossover_days_ago = alert.get("crossover_days_ago", None)
+        sep_pct = alert.get("separation_pct", 0.0)
         sma200 = _compute_sma(close_list, 200)
         sma200_distance_pct = ((close - sma200) / sma200 * 100) if sma200 > 0 else -999.0
-        if req.require_above_sma200 and sma200_distance_pct <= 0:
-            continue
         vol_ratio = _compute_vol_ratio(volume_list)
-        if vol_ratio < req.min_volume_ratio:
-            continue
         short_emas = alert.get("short_ema_values", {})
         long_emas  = alert.get("long_ema_values", {})
         ema3  = float(short_emas.get("3",  close))
         ema60 = float(long_emas.get("60", close))
         ema3_to_ema60_ratio = ((ema3 - ema60) / ema60 * 100) if ema60 > 0 else 999.0
+
+        failed_criteria = []
+        penalty = 0.0
+        
+        if close < req.min_price:
+            failed_criteria.append(f"Price < ${req.min_price}")
+            penalty += (req.min_price - close) * 2
+
+        if req.require_crossover:
+            if crossover_days_ago is None:
+                failed_criteria.append("No recent crossover")
+                penalty += 30
+            elif crossover_days_ago > req.max_crossover_days:
+                failed_criteria.append(f"Crossover > {req.max_crossover_days}d")
+                penalty += (crossover_days_ago - req.max_crossover_days) * 2
+
+        if sep_pct < req.min_separation_pct:
+            failed_criteria.append(f"Sep < {req.min_separation_pct}%")
+            penalty += (req.min_separation_pct - sep_pct) * 10
+        elif sep_pct > req.max_separation_pct:
+            failed_criteria.append(f"Sep > {req.max_separation_pct}%")
+            penalty += (sep_pct - req.max_separation_pct) * 2
+
+        if req.require_above_sma200 and sma200_distance_pct <= 0:
+            failed_criteria.append("Below SMA200")
+            penalty += abs(sma200_distance_pct) * 2
+
+        if vol_ratio < req.min_volume_ratio:
+            failed_criteria.append(f"Vol < {req.min_volume_ratio}x")
+            penalty += (req.min_volume_ratio - vol_ratio) * 20
+
         if ema3_to_ema60_ratio > req.max_ema3_to_ema60_ratio:
-            continue
+            failed_criteria.append("Formation too loose")
+            penalty += (ema3_to_ema60_ratio - req.max_ema3_to_ema60_ratio) * 2
+
         atr = _compute_atr(high_list, low_list, close_list, 14)
         if atr <= 0:
             atr = close * 0.015
@@ -1137,20 +1170,30 @@ def gmma_strategy_proposal(req: GMMAStrategyRequest):
         risk_dollars      = total_portfolio_value * 0.02
         shares_for_2pct   = int(risk_dollars / risk_per_share) if risk_per_share > 0 else 0
         position_size_pct = round((shares_for_2pct * entry_zone_low / total_portfolio_value * 100), 1) if total_portfolio_value > 0 else 0.0
+        
         score = 0.0
         if 5 <= sma200_distance_pct <= 50:
             score += min(25, sma200_distance_pct * 0.5)
         elif sma200_distance_pct > 0:
             score += 10
-        score += min(20, (vol_ratio - 1.0) * 20)
+        score += min(20, max(0, vol_ratio - 1.0) * 20)
         if 2 <= sep_pct <= 10:
             score += 20
         elif 10 < sep_pct <= 20:
             score += max(0, 20 - (sep_pct - 10) * 2)
-        score += max(0, 20 - ema3_to_ema60_ratio)
+        score += max(0, 20 - max(0, ema3_to_ema60_ratio))
         if crossover_days_ago is not None:
             score += max(0, 15 - crossover_days_ago)
+            
+        score -= penalty
         bet_score = round(min(100, max(0, score)))
+        
+        # Keep candidates even with score 0 if they don't fail any criteria? 
+        # Usually they wouldn't have score 0. But if they failed massively, bet_score is 0.
+        # Let's skip terrible candidates that scored 0 and failed criteria.
+        if bet_score <= 0 and len(failed_criteria) > 0:
+            continue
+            
         conviction = "VERY HIGH" if bet_score >= 75 else ("HIGH" if bet_score >= 55 else "MODERATE")
         enriched.append({
             "ticker": ticker, "name": alert.get("name", ticker),
@@ -1164,6 +1207,7 @@ def gmma_strategy_proposal(req: GMMAStrategyRequest):
             "target_1": target_1, "target_2": target_2,
             "risk_reward": risk_reward, "position_size_pct": position_size_pct,
             "conviction": conviction,
+            "failed_criteria": failed_criteria,
         })
 
     enriched.sort(key=lambda x: x["bet_score"], reverse=True)
@@ -1259,13 +1303,15 @@ def gmma_strategy_proposal(req: GMMAStrategyRequest):
                 "\n\n---\nDisclaimer: Educational/informational only. Not official financial advice."
             )
 
-    return {
+    result = {
         "candidates": top_candidates,
         "ai_proposal": ai_text,
         "filter_params": req.dict(),
         "generated_at": dt_mod.datetime.now().isoformat(),
         "mode": mode
     }
+    config.write_json("gmma_proposal_latest.json", result)
+    return result
 
 
 # News Scraping Cache
@@ -1461,6 +1507,66 @@ async def get_news_article(article_id: int):
         if cache_key in news_cache:
             return news_cache[cache_key]["data"]
         raise HTTPException(status_code=500, detail=f"Failed to load article: {str(e)}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Earnings Calendar Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/earnings-calendar")
+def get_earnings_calendar(tickers: str = Query("")):
+    if not tickers:
+        return {}
+    
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    result = {}
+    
+    cache_file = "earnings_cache.json"
+    cache = config.read_json(cache_file) if config.json_exists(cache_file) else {}
+    
+    now = time.time()
+    CACHE_TTL = 7 * 24 * 3600  # 7 days in seconds
+    updated_cache = False
+    import yfinance as yf
+    
+    for tk in ticker_list:
+        if tk in cache and (now - cache[tk].get("timestamp", 0)) < CACHE_TTL:
+            if cache[tk].get("date"):
+                result[tk] = cache[tk]["date"]
+            continue
+            
+        try:
+            t = yf.Ticker(tk)
+            cal = t.calendar
+            earnings_date = None
+            if isinstance(cal, dict) and 'Earnings Date' in cal and cal['Earnings Date']:
+                d = cal['Earnings Date'][0]
+                earnings_date = d.strftime("%Y-%m-%d")
+                
+            if not earnings_date:
+                # fallback to info if available
+                info = t.info
+                if info and 'earningsTimestamp' in info:
+                    import datetime as dt_mod
+                    d = dt_mod.datetime.fromtimestamp(info['earningsTimestamp'])
+                    earnings_date = d.strftime("%Y-%m-%d")
+                    
+            cache[tk] = {
+                "date": earnings_date,
+                "timestamp": now
+            }
+            updated_cache = True
+            
+            if earnings_date:
+                result[tk] = earnings_date
+        except Exception as e:
+            print(f"Error fetching earnings date for {tk}: {e}")
+            # still cache the attempt so we don't spam errors
+            cache[tk] = {"date": None, "timestamp": now}
+            updated_cache = True
+            
+    if updated_cache:
+        config.write_json(cache_file, cache)
+        
+    return result
 
 
 async def warm_news_cache_loop():
