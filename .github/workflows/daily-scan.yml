@@ -49,11 +49,17 @@ jobs:
         run: |
           cd backend
           
-          # If triggered manually, use the provided input. Otherwise use all_index
+          # If triggered manually, use the provided input. Otherwise scan all universes sequentially
           UNIVERSE="${{ github.event.inputs.universe }}"
           if [ -z "$UNIVERSE" ]; then
-            UNIVERSE="all_index"
+            UNIVERSES="watchlist all_index nasdaq nyse amex"
+            for u in $UNIVERSES; do
+              echo "============================================="
+              echo "Starting scan for universe: $u"
+              echo "============================================="
+              python scanner_job.py $u
+            done
+          else
+            echo "Starting scan for universe: $UNIVERSE"
+            python scanner_job.py $UNIVERSE
           fi
-          
-          echo "Starting scan for universe: $UNIVERSE"
-          python scanner_job.py $UNIVERSE
