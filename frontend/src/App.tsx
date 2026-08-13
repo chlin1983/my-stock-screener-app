@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChartPanel } from './components/ChartPanel';
 import { WatchlistManager } from './components/WatchlistManager';
 import { PortfolioDashboard } from './components/PortfolioDashboard';
@@ -114,7 +114,7 @@ function App() {
   // Selected Stock states
   const [selectedTicker, setSelectedTicker] = useState<string>('');
   const [history, setHistory] = useState<Candle[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [, setLoadingHistory] = useState<boolean>(false);
   const [selectedAlertDetails, setSelectedAlertDetails] = useState<any>(null);
 
   // Settings view tab: 'screener' or 'watchlists'
@@ -165,7 +165,7 @@ function App() {
   });
 
   const [universeMode, setUniverseMode] = useState<
-    'watchlist' | 'all_index' | 'dow30' | 'nasdaq100' | 'sp500' | 'nasdaq' | 'nyse' | 'amex' | 'all_usa'
+    'watchlist' | 'all_index' | 'nasdaq' | 'nyse' | 'amex'
   >('watchlist');
 
   const activeWatchlist = activeWatchlistId === 'all'
@@ -418,12 +418,21 @@ function App() {
     return () => clearInterval(interval);
   }, [status.is_running]);
 
+  const historyAbortController = useRef<AbortController | null>(null);
+
   const handleSelectStock = async (ticker: string, alertDetails: any) => {
     setSelectedTicker(ticker);
     setSelectedAlertDetails(alertDetails);
     setLoadingHistory(true);
+    
+    if (historyAbortController.current) {
+      historyAbortController.current.abort();
+    }
+    const controller = new AbortController();
+    historyAbortController.current = controller;
+
     try {
-      const res = await fetch(`${BACKEND_URL}/stock/${ticker}/history`);
+      const res = await fetch(`${BACKEND_URL}/stock/${ticker}/history`, { signal: controller.signal });
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
       
@@ -437,11 +446,14 @@ function App() {
         volume: data.volume[i]
       }));
       setHistory(formattedCandles);
-    } catch (e) {
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
       console.error(`Error loading stock history for ${ticker}:`, e);
       setHistory([]);
     } finally {
-      setLoadingHistory(false);
+      if (historyAbortController.current === controller) {
+        setLoadingHistory(false);
+      }
     }
   };
 
@@ -629,10 +641,6 @@ function App() {
                     >
                       <option value="watchlist">📋 Custom Watchlist</option>
                       <option value="all_index">🇺🇸 All Index (Dow Jones 30 + Nasdaq 100 + S&P 500)</option>
-                      <option value="all_usa">🇺🇸 All USA (NASDAQ + NYSE + AMEX)</option>
-                      <option value="dow30">🇺🇸 Dow Jones 30</option>
-                      <option value="nasdaq100">🇺🇸 Nasdaq 100</option>
-                      <option value="sp500">🇺🇸 S&P 500</option>
                       <option value="nasdaq">🇺🇸 Full NASDAQ Exchange</option>
                       <option value="nyse">🇺🇸 Full NYSE Exchange</option>
                       <option value="amex">🇺🇸 AMEX Exchange</option>
@@ -661,23 +669,15 @@ function App() {
                     <div className="all-usa-info">
                       <div className="all-usa-badge">
                         {universeMode === 'all_index' && 'All Index (~630 stocks)'}
-                        {universeMode === 'dow30' && 'Dow Jones 30 (~30 stocks)'}
-                        {universeMode === 'nasdaq100' && 'Nasdaq 100 (~100 stocks)'}
-                        {universeMode === 'sp500' && 'S&P 500 (~500 stocks)'}
                         {universeMode === 'nasdaq' && 'NASDAQ Exchange (~4,000 stocks)'}
                         {universeMode === 'nyse' && 'NYSE Exchange (~2,500 stocks)'}
                         {universeMode === 'amex' && 'AMEX Exchange (~500 stocks)'}
-                        {universeMode === 'all_usa' && 'NASDAQ + NYSE + AMEX (~8,000 stocks)'}
                       </div>
                       <p className="all-usa-desc">
                         {universeMode === 'all_index' && 'Moderate scan (~4-6 minutes).'}
-                        {universeMode === 'dow30' && 'Very fast scan (~30 seconds).'}
-                        {universeMode === 'nasdaq100' && 'Fast scan (~1-2 minutes).'}
-                        {universeMode === 'sp500' && 'Moderate scan (~3-5 minutes).'}
                         {universeMode === 'nasdaq' && 'Slow scan (~10-15 minutes).'}
                         {universeMode === 'nyse' && 'Slow scan (~8-12 minutes).'}
                         {universeMode === 'amex' && 'Moderate scan (~2-3 minutes).'}
-                        {universeMode === 'all_usa' && 'Very slow scan (~20-40 minutes on first run).'}
                       </p>
                     </div>
                   )}
@@ -1190,24 +1190,15 @@ function App() {
             <div className="right-chart-panel">
               {selectedTicker ? (
                 <div className="chart-panel-container">
-
-
                   <div style={{ position: 'relative' }}>
-                    {loadingHistory && (
-                      <div className="chart-loading-overlay">
-                        <div className="loading-spinner" style={{ width: '35px', height: '35px' }}></div>
-                      </div>
-                    )}
-                    {history.length > 0 && (
-                      <ChartPanel
-                        ticker={selectedTicker}
-                        candles={history}
-                        highlightDate={activeTab === 'ma20' ? history[history.length - 1]?.time : undefined}
-                        vcpContractions={activeTab === 'vcp' ? selectedAlertDetails?.contractions : undefined}
-                        gmmaData={gmmaChartData}
-                        theme={theme}
-                      />
-                    )}
+                    <ChartPanel
+                      ticker={selectedTicker}
+                      candles={history}
+                      highlightDate={activeTab === 'ma20' ? history[history.length - 1]?.time : undefined}
+                      vcpContractions={activeTab === 'vcp' ? selectedAlertDetails?.contractions : undefined}
+                      gmmaData={gmmaChartData}
+                      theme={theme}
+                    />
                   </div>
                   
                   {/* GMMA Detail Card — shown on both GMMA and GMMA (all) tabs when selectedAlertDetails is a real GMMA alert */}
