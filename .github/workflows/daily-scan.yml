@@ -1,0 +1,59 @@
+name: Daily Stock Screener Scan
+
+on:
+  schedule:
+    # Runs at 22:00 UTC (6:00 PM EST / 3:00 PM PST) every weekday (Monday through Friday)
+    # Adjust this based on your preferred time
+    - cron: '0 22 * * 1-5'
+  
+  # This allows you to manually trigger the scan anytime from the GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: 'Universe to scan (e.g., all_index, nasdaq, all_usa)'
+        required: false
+        default: 'all_index'
+
+jobs:
+  run-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip' # Speeds up subsequent runs
+          
+      - name: Install dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          # You need to add this JSON key in your GitHub Repository settings
+          credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+          
+      - name: Run Daily Scan
+        env:
+          STORAGE_TYPE: 'gcs'
+          # Add these to your GitHub Repository Secrets
+          GCS_BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          cd backend
+          
+          # If triggered manually, use the provided input. Otherwise use all_index
+          UNIVERSE="${{ github.event.inputs.universe }}"
+          if [ -z "$UNIVERSE" ]; then
+            UNIVERSE="all_index"
+          fi
+          
+          echo "Starting scan for universe: $UNIVERSE"
+          python scanner_job.py $UNIVERSE
