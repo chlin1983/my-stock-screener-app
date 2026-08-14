@@ -1198,6 +1198,7 @@ function App() {
                       vcpContractions={activeTab === 'vcp' ? selectedAlertDetails?.contractions : undefined}
                       gmmaData={gmmaChartData}
                       theme={theme}
+                      scanTimestamp={results.timestamp}
                     />
                   </div>
                   
