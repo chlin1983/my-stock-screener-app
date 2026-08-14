@@ -21,6 +21,7 @@ interface ChartPanelProps {
     isBullishAligned?: boolean;
   };
   theme?: 'light' | 'dark';
+  scanTimestamp?: string | null;
 }
 
 // GMMA short-term palette: 6 blue shades (traders)
@@ -487,9 +488,22 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   highlightDate,
   vcpContractions,
   gmmaData,
-  theme = 'light'
+  theme = 'light',
+  scanTimestamp
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  // Persistent chart instance and series refs — never recreated on stock change
+  const chartRef = useRef<any>(null);
+  const candleSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
+  const ma20SeriesRef = useRef<any>(null);
+  const ma50SeriesRef = useRef<any>(null);
+  const ma150SeriesRef = useRef<any>(null);
+  const ma200SeriesRef = useRef<any>(null);
+  const gmmaShortSeriesRef = useRef<any[]>([]);
+  const gmmaLongSeriesRef = useRef<any[]>([]);
+  const lastCandlesRef = useRef<Candle[]>([]);
+  const seriesMarkersRef = useRef<any>(null); // Persistent markers plugin — never recreated
   const [timeframe, setTimeframe] = useState<'1Y' | '2Y' | '3Y'>('1Y');
   const [showGMMA, setShowGMMA] = useState<boolean>(gmmaData?.showByDefault ?? false);
   const [showMA20, setShowMA20] = useState<boolean>(true);
@@ -506,21 +520,30 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       setDetails(null);
       return;
     }
+    const controller = new AbortController();
+    
     const fetchDetails = async () => {
       setLoadingDetails(true);
       try {
-        const res = await fetch(`${BACKEND_URL}/stock/${ticker}/details`);
+        const res = await fetch(`${BACKEND_URL}/stock/${ticker}/details`, { signal: controller.signal });
         if (!res.ok) throw new Error('Failed to fetch details');
         const data = await res.json();
         setDetails(data);
-      } catch (e) {
+      } catch (e: any) {
+        if (e.name === 'AbortError') return;
         console.error("Error fetching stock details:", e);
         setDetails(null);
       } finally {
-        setLoadingDetails(false);
+        if (!controller.signal.aborted) {
+          setLoadingDetails(false);
+        }
       }
     };
     fetchDetails();
+    
+    return () => {
+      controller.abort();
+    };
   }, [ticker]);
 
   // Color Pickers state (persistent with localStorage & backend GCS settings)
@@ -676,9 +699,26 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     return ema;
   };
 
+  // Effect 1: Create the chart instance and all series once on mount.
+  // Only re-runs when visual settings change (theme, MA toggles, colors, timeframe).
+  // Does NOT run when candles change — data updates are handled by Effect 2.
   useEffect(() => {
-    if (!chartContainerRef.current || candles.length === 0) return;
+    if (!chartContainerRef.current) return;
 
+    // Destroy old chart if it exists (e.g., theme change)
+    if (chartRef.current) {
+      chartRef.current.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      ma20SeriesRef.current = null;
+      ma50SeriesRef.current = null;
+      ma150SeriesRef.current = null;
+      ma200SeriesRef.current = null;
+      gmmaShortSeriesRef.current = [];
+      gmmaLongSeriesRef.current = [];
+      seriesMarkersRef.current = null;
+    }
 
     const isDark = theme === 'dark';
     // 1. Initialize Chart
@@ -728,94 +768,73 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       wickDownColor: '#ef4444',
       wickUpColor: '#10b981',
     });
+    candleSeriesRef.current = candlestickSeries;
 
-    const chartCandles = candles.map(c => ({
-      time: c.time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close
+    // Seed with existing candle data if available
+    const seedCandles = lastCandlesRef.current.length > 0 ? lastCandlesRef.current : candles;
+    const chartCandles = seedCandles.map(c => ({
+      time: c.time, open: c.open, high: c.high, low: c.low, close: c.close
     }));
-
     candlestickSeries.setData(chartCandles);
 
     // 3. Add Moving Average Lines (SMA)
     if (showMA20) {
-      const sma20Data = calculateSMA(candles, ma20Period);
       const sma20Line = chart.addSeries(LineSeries, {
-        color: ma20Color,
-        lineWidth: 2,
-        title: `MA${ma20Period}`,
-        priceLineVisible: false,
-        lastValueVisible: false,
+        color: ma20Color, lineWidth: 2, title: `MA${ma20Period}`,
+        priceLineVisible: false, lastValueVisible: false,
       });
-      sma20Line.setData(sma20Data);
+      sma20Line.setData(calculateSMA(seedCandles, ma20Period));
+      ma20SeriesRef.current = sma20Line;
     }
 
     if (showMA50) {
-      const sma50Data = calculateSMA(candles, ma50Period);
       const sma50Line = chart.addSeries(LineSeries, {
-        color: ma50Color,
-        lineWidth: 2,
-        title: `MA${ma50Period}`,
-        priceLineVisible: false,
-        lastValueVisible: false,
+        color: ma50Color, lineWidth: 2, title: `MA${ma50Period}`,
+        priceLineVisible: false, lastValueVisible: false,
       });
-      sma50Line.setData(sma50Data);
+      sma50Line.setData(calculateSMA(seedCandles, ma50Period));
+      ma50SeriesRef.current = sma50Line;
     }
 
     if (showMA150) {
-      const sma150Data = calculateSMA(candles, ma150Period);
       const sma150Line = chart.addSeries(LineSeries, {
-        color: ma150Color,
-        lineWidth: 2,
-        title: `MA${ma150Period}`,
-        priceLineVisible: false,
-        lastValueVisible: false,
+        color: ma150Color, lineWidth: 2, title: `MA${ma150Period}`,
+        priceLineVisible: false, lastValueVisible: false,
       });
-      sma150Line.setData(sma150Data);
+      sma150Line.setData(calculateSMA(seedCandles, ma150Period));
+      ma150SeriesRef.current = sma150Line;
     }
 
     if (showMA200) {
-      const sma200Data = calculateSMA(candles, ma200Period);
       const sma200Line = chart.addSeries(LineSeries, {
-        color: ma200Color,
-        lineWidth: 2,
-        title: `MA${ma200Period}`,
-        priceLineVisible: false,
-        lastValueVisible: false,
+        color: ma200Color, lineWidth: 2, title: `MA${ma200Period}`,
+        priceLineVisible: false, lastValueVisible: false,
       });
-      sma200Line.setData(sma200Data);
+      sma200Line.setData(calculateSMA(seedCandles, ma200Period));
+      ma200SeriesRef.current = sma200Line;
     }
 
-    // 4. Add GMMA EMA Lines (12 lines, shown only when showGMMA is true)
-    if (showGMMA) {
-      // Short-term group (traders) — teal/cyan palette
-      GMMA_SHORT_PERIODS.forEach((period, idx) => {
-        const emaData = calculateEMA(candles, period);
-        const line = chart.addSeries(LineSeries, {
-          color: GMMA_SHORT_COLORS[idx],
-          lineWidth: 1,
-          title: `G${period}`,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        line.setData(emaData);
+    // 4. Add GMMA EMA Lines (12 lines)
+    gmmaShortSeriesRef.current = [];
+    gmmaLongSeriesRef.current = [];
+    GMMA_SHORT_PERIODS.forEach((period, idx) => {
+      const line = chart.addSeries(LineSeries, {
+        color: GMMA_SHORT_COLORS[idx], lineWidth: 1, title: `G${period}`,
+        priceLineVisible: false, lastValueVisible: false,
+        visible: showGMMA,
       });
-
-      // Long-term group (investors) — amber/red palette
-      GMMA_LONG_PERIODS.forEach((period, idx) => {
-        const emaData = calculateEMA(candles, period);
-        const line = chart.addSeries(LineSeries, {
-          color: GMMA_LONG_COLORS[idx],
-          lineWidth: 1,
-          title: `G${period}`,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        line.setData(emaData);
+      if (seedCandles.length > 0) line.setData(calculateEMA(seedCandles, period));
+      gmmaShortSeriesRef.current.push(line);
+    });
+    GMMA_LONG_PERIODS.forEach((period, idx) => {
+      const line = chart.addSeries(LineSeries, {
+        color: GMMA_LONG_COLORS[idx], lineWidth: 1, title: `G${period}`,
+        priceLineVisible: false, lastValueVisible: false,
+        visible: showGMMA,
       });
-    }
+      if (seedCandles.length > 0) line.setData(calculateEMA(seedCandles, period));
+      gmmaLongSeriesRef.current.push(line);
+    });
 
     // 5. Add Volume Series (Lower 20% of the chart)
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -842,81 +861,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       };
     });
     volumeSeries.setData(volumeData);
+    volumeSeriesRef.current = volumeSeries;
 
-    // 6. Add Markers for buy alerts or contraction peaks/valleys
-    const markers: any[] = [];
+    // Note: Markers are NOT set here in the setup effect.
+    // They are handled exclusively by Effect 2 (data update effect) to avoid duplication.
 
-    if (highlightDate) {
-      markers.push({
-        time: highlightDate,
-        position: 'belowBar',
-        color: '#eab308',
-        shape: 'arrowUp',
-        text: 'MA20 Pullback',
-        size: 1.5
-      });
-    }
-
-    if (vcpContractions && vcpContractions.length > 0) {
-      // Find historical index from contractions and map to time
-      const lookbackStartIdx = candles.length - 100;
-
-      vcpContractions.forEach((c, index) => {
-        const peakCandleIdx = lookbackStartIdx + c.peak_idx;
-        const troughCandleIdx = lookbackStartIdx + c.trough_idx;
-
-        if (peakCandleIdx >= 0 && peakCandleIdx < candles.length) {
-          markers.push({
-            time: candles[peakCandleIdx].time,
-            position: 'aboveBar',
-            color: '#ef4444',
-            shape: 'arrowDown',
-            text: `Peak T${index + 1} (-${c.depth_pct}%)`
-          });
-        }
-
-        if (troughCandleIdx >= 0 && troughCandleIdx < candles.length) {
-          markers.push({
-            time: candles[troughCandleIdx].time,
-            position: 'belowBar',
-            color: '#10b981',
-            shape: 'arrowUp',
-            text: `Low T${index + 1}`
-          });
-        }
-      });
-
-      // Also mark final breakout setup on the very last candle
-      markers.push({
-        time: candles[candles.length - 1].time,
-        position: 'belowBar',
-        color: '#a855f7',
-        shape: 'arrowUp',
-        text: 'VCP Buy Setup',
-        size: 1.5
-      });
-    }
-
-    // GMMA crossover marker
-    if (gmmaData && showGMMA) {
-      if (gmmaData.crossoverDaysAgo !== null && gmmaData.crossoverDaysAgo !== undefined) {
-        const crossoverIdx = candles.length - gmmaData.crossoverDaysAgo;
-        if (crossoverIdx >= 0 && crossoverIdx < candles.length) {
-          markers.push({
-            time: candles[crossoverIdx].time,
-            position: 'belowBar',
-            color: '#0000FF',
-            shape: 'arrowUp',
-            text: 'GMMA Crossover',
-            size: 1.5
-          });
-        }
-      }
-    }
-
-    if (markers.length > 0) {
-      createSeriesMarkers(candlestickSeries, markers);
-    }
+    // Store chart instance ref
+    chartRef.current = chart;
 
     // 7. Fit time scale to show all data
     chart.timeScale().fitContent();
@@ -958,9 +909,101 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     return () => {
       resizeObserver.disconnect();
       clearTimeout(timerId);
-      chart.remove();
     };
-  }, [candles, highlightDate, vcpContractions, gmmaData, theme, timeframe, showGMMA, showMA20, showMA50, showMA150, showMA200, ma20Color, ma50Color, ma150Color, ma200Color, ma20Period, ma50Period, ma150Period, ma200Period]);
+  }, [theme, timeframe, showGMMA, showMA20, showMA50, showMA150, showMA200, ma20Color, ma50Color, ma150Color, ma200Color, ma20Period, ma50Period, ma150Period, ma200Period]);
+
+  // Effect 2: Fast data update — runs when candles change (stock switch).
+  // Only calls setData() on existing series — no chart recreation, near-instant.
+  useEffect(() => {
+    if (candles.length === 0) return;
+    lastCandlesRef.current = candles;
+
+    if (!chartRef.current || !candleSeriesRef.current) return;
+
+    // Update candlestick data
+    candleSeriesRef.current.setData(candles.map((c: Candle) => ({
+      time: c.time, open: c.open, high: c.high, low: c.low, close: c.close
+    })));
+
+    // Update volume
+    if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.setData(candles.map((c: Candle) => ({
+        time: c.time, value: c.volume,
+        color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+      })));
+    }
+
+    // Update MA lines
+    if (ma20SeriesRef.current) ma20SeriesRef.current.setData(calculateSMA(candles, ma20Period));
+    if (ma50SeriesRef.current) ma50SeriesRef.current.setData(calculateSMA(candles, ma50Period));
+    if (ma150SeriesRef.current) ma150SeriesRef.current.setData(calculateSMA(candles, ma150Period));
+    if (ma200SeriesRef.current) ma200SeriesRef.current.setData(calculateSMA(candles, ma200Period));
+
+    // Update GMMA lines
+    GMMA_SHORT_PERIODS.forEach((period, idx) => {
+      if (gmmaShortSeriesRef.current[idx]) {
+        gmmaShortSeriesRef.current[idx].setData(calculateEMA(candles, period));
+      }
+    });
+    GMMA_LONG_PERIODS.forEach((period, idx) => {
+      if (gmmaLongSeriesRef.current[idx]) {
+        gmmaLongSeriesRef.current[idx].setData(calculateEMA(candles, period));
+      }
+    });
+
+    // Update markers — reuse the existing plugin primitive to avoid stacking duplicates
+    const markers: any[] = [];
+    if (highlightDate) {
+      markers.push({ time: highlightDate, position: 'belowBar', color: '#eab308', shape: 'arrowUp', text: 'MA20 Pullback', size: 1.5 });
+    }
+    if (vcpContractions && vcpContractions.length > 0) {
+      const lookbackStartIdx = candles.length - 100;
+      vcpContractions.forEach((c, index) => {
+        const peakCandleIdx = lookbackStartIdx + c.peak_idx;
+        const troughCandleIdx = lookbackStartIdx + c.trough_idx;
+        if (peakCandleIdx >= 0 && peakCandleIdx < candles.length) {
+          markers.push({ time: candles[peakCandleIdx].time, position: 'aboveBar', color: '#ef4444', shape: 'arrowDown', text: `Peak T${index + 1} (-${c.depth_pct}%)` });
+        }
+        if (troughCandleIdx >= 0 && troughCandleIdx < candles.length) {
+          markers.push({ time: candles[troughCandleIdx].time, position: 'belowBar', color: '#10b981', shape: 'arrowUp', text: `Low T${index + 1}` });
+        }
+      });
+      markers.push({ time: candles[candles.length - 1].time, position: 'belowBar', color: '#a855f7', shape: 'arrowUp', text: 'VCP Buy Setup', size: 1.5 });
+    }
+    if (gmmaData && showGMMA && gmmaData.crossoverDaysAgo !== null && gmmaData.crossoverDaysAgo !== undefined) {
+      const crossoverIdx = candles.length - gmmaData.crossoverDaysAgo;
+      if (crossoverIdx >= 0 && crossoverIdx < candles.length) {
+        markers.push({ time: candles[crossoverIdx].time, position: 'belowBar', color: '#0000FF', shape: 'arrowUp', text: 'GMMA Crossover', size: 1.5 });
+      }
+    }
+    // Use setMarkers() if the primitive already exists, otherwise create it once
+    if (seriesMarkersRef.current) {
+      seriesMarkersRef.current.setMarkers(markers);
+    } else {
+      seriesMarkersRef.current = createSeriesMarkers(candleSeriesRef.current, markers);
+    }
+
+    // Adjust visible range
+    let visibleBars = 252;
+    if (timeframe === '2Y') visibleBars = 504;
+    else if (timeframe === '3Y') visibleBars = 756;
+    try {
+      chartRef.current.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, candles.length - visibleBars),
+        to: candles.length - 1 + 18,
+      });
+    } catch (e) { /* ignore */ }
+  }, [candles, highlightDate, vcpContractions, gmmaData, showGMMA]);
+
+  // Cleanup chart on unmount
+  useEffect(() => {
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="chart-panel">
@@ -1096,16 +1139,25 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
             </button>
           </div>
         </div>
-        <div className="chart-timeframe-selector">
-          {(['1Y', '2Y', '3Y'] as const).map((tf) => (
-            <button
-              key={tf}
-              className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`}
-              onClick={() => setTimeframe(tf)}
-            >
-              {tf === '1Y' ? '1 Year' : tf === '2Y' ? '2 Years' : '3 Years'}
-            </button>
-          ))}
+        <div className="chart-timeframe-selector" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+          {scanTimestamp && (
+            <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', fontWeight: 500, paddingRight: '2px' }}>
+              Last Scanned: {new Date(scanTimestamp).toLocaleString(undefined, { 
+                month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' 
+              })}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {(['1Y', '2Y', '3Y'] as const).map((tf) => (
+              <button
+                key={tf}
+                className={`timeframe-btn ${timeframe === tf ? 'active' : ''}`}
+                onClick={() => setTimeframe(tf)}
+              >
+                {tf === '1Y' ? '1 Year' : tf === '2Y' ? '2 Years' : '3 Years'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div ref={chartContainerRef} style={{ width: '100%', height: '450px' }} />
