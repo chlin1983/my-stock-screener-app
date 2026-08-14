@@ -238,12 +238,28 @@ def get_latest_scan(universe: Optional[str] = None):
                 [a["ticker"] for a in gmma_all]
             ))
             
-            ticker_names = {}
-            for t in unique_tickers:
+            import concurrent.futures
+            import json
+            from fastapi.responses import Response
+            
+            def fetch_detail(t):
                 try:
-                    ticker_names[t] = yf.Ticker(t).info.get('longName', t)
-                except Exception:
-                    ticker_names[t] = t
+                    res = get_stock_details(t)
+                    if isinstance(res, Response):
+                        data = json.loads(res.body)
+                        return t, data.get("name", t)
+                    elif isinstance(res, dict):
+                        return t, res.get("name", t)
+                except Exception as e:
+                    print(f"Error fetching detail for {t}: {e}")
+                return t, t
+                
+            ticker_names = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                results = list(executor.map(fetch_detail, unique_tickers))
+                
+            for t, name in results:
+                ticker_names[t] = name
                     
             for a in ma20_alerts:
                 if "name" not in a:
@@ -287,23 +303,25 @@ def run_scan_endpoint(req: ScanRequest, background_tasks: BackgroundTasks, sync:
         return {"message": "Scan started in background.", "status": "running", "universe": req.universe}
 
 @app.get("/stock/{ticker}/history")
-def get_stock_history(ticker: str):
+async def get_stock_history(ticker: str):
     ticker = ticker.upper()
     cache_key = f"stocks/{ticker}.json"
     
-    # 1. Try reading from cache first
-    if config.json_exists(cache_key):
-        try:
-            cache_data = config.read_json(cache_key)
-            if cache_data.get("fetched_4y", False):
-                return cache_data
-        except Exception as e:
-            print(f"Error reading cache for {ticker}: {e}")
+    # 1. Try reading from cache first (which prioritizes local disk)
+    try:
+        raw_json_str = config.read_json_raw(cache_key)
+        # Verify it has fetched_4y without heavy parsing
+        if '"fetched_4y": true' in raw_json_str or '"fetched_4y": True' in raw_json_str:
+            from fastapi.responses import Response
+            return Response(content=raw_json_str, media_type="application/json")
+    except Exception as e:
+        print(f"Cache miss for {ticker}: {e}")
             
     # 2. Fetch from yfinance if not in cache (or if cache doesn't have 4y data)
     try:
+        import asyncio
         print(f"Fetching history online for {ticker} (4y)...")
-        df = yf.download(ticker, period="4y", interval="1d", progress=False)
+        df = await asyncio.to_thread(yf.download, ticker, period="4y", interval="1d", progress=False)
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No stock data found for ticker {ticker}")
             
@@ -355,9 +373,11 @@ def get_stock_details(ticker: str):
     
     # Check if cache is fresh (less than 7 days old)
     seven_days_ago = time.time() - 7 * 24 * 3600
-    if config.json_exists(cache_filename) and config.get_json_mtime(cache_filename) > seven_days_ago:
+    if config.get_json_mtime(cache_filename) > seven_days_ago:
         try:
-            return config.read_json(cache_filename)
+            raw_json_str = config.read_json_raw(cache_filename)
+            from fastapi.responses import Response
+            return Response(content=raw_json_str, media_type="application/json")
         except Exception:
             pass # Fallback to live fetch if cache read fails
             
@@ -425,17 +445,27 @@ def get_stock_details(ticker: str):
         
     except Exception as e:
         print(f"Error fetching stock details for {ticker}: {e}")
-        # Return fallback empty structure
-        return {
+        # Return fallback details
+        data = {
             "ticker": ticker,
             "name": ticker,
-            "summary": "Failed to load company summary.",
+            "summary": "Failed to load company details.",
             "sector": "N/A",
             "industry": "N/A",
             "website": "",
             "market_cap": None,
             "financials": []
         }
+        
+        # Save fallback to cache so we don't keep retrying and lagging the UI
+        try:
+            if config.STORAGE_TYPE == "local":
+                os.makedirs(os.path.join(config.LOCAL_CACHE_DIR, "details"), exist_ok=True)
+            config.write_json(cache_filename, data, indent=2)
+        except Exception as cache_e:
+            print(f"Failed to write fallback cache for {ticker}: {cache_e}")
+            
+        return data
 
 class UserSettings(BaseModel):
     ma20Color: Optional[str] = None
@@ -1054,6 +1084,19 @@ def get_latest_gmma_proposal():
         return config.read_json("gmma_proposal_latest.json")
     return {"candidates": [], "ai_proposal": "", "filter_params": None, "generated_at": None, "mode": None}
 
+@app.get("/ai/strategy/gmma-proposal/history")
+def get_gmma_proposal_history():
+    if config.json_exists("gmma_proposals_history.json"):
+        return config.read_json("gmma_proposals_history.json")
+    # fallback to latest if history doesn't exist yet
+    if config.json_exists("gmma_proposal_latest.json"):
+        latest = config.read_json("gmma_proposal_latest.json")
+        if "id" not in latest:
+            import uuid
+            latest["id"] = str(uuid.uuid4())
+        return [latest]
+    return []
+
 @app.post("/ai/strategy/gmma-proposal")
 def gmma_strategy_proposal(req: GMMAStrategyRequest):
     """
@@ -1303,13 +1346,30 @@ def gmma_strategy_proposal(req: GMMAStrategyRequest):
                 "\n\n---\nDisclaimer: Educational/informational only. Not official financial advice."
             )
 
+    import uuid
     result = {
+        "id": str(uuid.uuid4()),
         "candidates": top_candidates,
         "ai_proposal": ai_text,
         "filter_params": req.dict(),
         "generated_at": dt_mod.datetime.now().isoformat(),
         "mode": mode
     }
+    
+    # Save to history
+    history = []
+    if config.json_exists("gmma_proposals_history.json"):
+        try:
+            history = config.read_json("gmma_proposals_history.json")
+        except Exception:
+            pass
+            
+    history.insert(0, result) # put newest first
+    # Keep only the last 50 runs
+    history = history[:50]
+    config.write_json("gmma_proposals_history.json", history)
+    
+    # Also overwrite latest for backwards compatibility
     config.write_json("gmma_proposal_latest.json", result)
     return result
 
@@ -1526,13 +1586,9 @@ def get_earnings_calendar(tickers: str = Query("")):
     CACHE_TTL = 7 * 24 * 3600  # 7 days in seconds
     updated_cache = False
     import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    for tk in ticker_list:
-        if tk in cache and (now - cache[tk].get("timestamp", 0)) < CACHE_TTL:
-            if cache[tk].get("date"):
-                result[tk] = cache[tk]["date"]
-            continue
-            
+    def fetch_earnings(tk):
         try:
             t = yf.Ticker(tk)
             cal = t.calendar
@@ -1548,20 +1604,35 @@ def get_earnings_calendar(tickers: str = Query("")):
                     import datetime as dt_mod
                     d = dt_mod.datetime.fromtimestamp(info['earningsTimestamp'])
                     earnings_date = d.strftime("%Y-%m-%d")
-                    
-            cache[tk] = {
-                "date": earnings_date,
-                "timestamp": now
-            }
-            updated_cache = True
-            
-            if earnings_date:
-                result[tk] = earnings_date
+            return tk, earnings_date
         except Exception as e:
             print(f"Error fetching earnings date for {tk}: {e}")
-            # still cache the attempt so we don't spam errors
-            cache[tk] = {"date": None, "timestamp": now}
-            updated_cache = True
+            return tk, None
+
+    tickers_to_fetch = []
+    for tk in ticker_list:
+        if tk in cache and (now - cache[tk].get("timestamp", 0)) < CACHE_TTL:
+            if cache[tk].get("date"):
+                result[tk] = cache[tk]["date"]
+        else:
+            tickers_to_fetch.append(tk)
+
+    if tickers_to_fetch:
+        # Fetch remaining in parallel
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_tk = {executor.submit(fetch_earnings, tk): tk for tk in tickers_to_fetch}
+            for future in as_completed(future_to_tk):
+                tk = future_to_tk[future]
+                earnings_date = future.result()[1]
+                
+                cache[tk] = {
+                    "date": earnings_date,
+                    "timestamp": now
+                }
+                updated_cache = True
+                
+                if earnings_date:
+                    result[tk] = earnings_date
             
     if updated_cache:
         config.write_json(cache_file, cache)
