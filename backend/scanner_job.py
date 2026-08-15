@@ -83,6 +83,7 @@ VALID_UNIVERSES = [
     ("nyse",      "Full NYSE Exchange   (~2,500 stocks, slow)"),
     ("amex",      "AMEX Exchange        (~500 stocks, moderate)"),
     ("all_usa",   "All USA              (~8,000 stocks, very slow first run)"),
+    ("all_index", "All Index            (Dow30 + Nasdaq100 + S&P500)"),
     ("watchlist", "Custom Watchlist     (tickers in config.py DEFAULT_WATCHLIST)"),
 ]
 UNIVERSE_KEYS = [u[0] for u in VALID_UNIVERSES]
