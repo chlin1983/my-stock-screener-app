@@ -92,15 +92,10 @@ def get_json_mtime(relative_path: str) -> float:
             
     return 0.0
 def read_json_raw(relative_path: str) -> str:
-    """Reads a JSON file as a raw string, prioritizing local cache to save GCS network calls."""
+    """Reads a JSON file as a raw string, ensuring fresh data from GCS if configured."""
     local_path = os.path.join(LOCAL_CACHE_DIR, relative_path)
     
-    # Try reading from local cache first to avoid slow GCS network calls
-    if os.path.exists(local_path):
-        with open(local_path, "r", encoding="utf-8") as f:
-            return f.read()
-            
-    # If not local, try GCS
+    # If using GCS, ALWAYS fetch from GCS to ensure we get the latest nightly scan
     if STORAGE_TYPE == "gcs":
         bucket = _get_gcs_bucket()
         if bucket:
@@ -108,12 +103,17 @@ def read_json_raw(relative_path: str) -> str:
             blob = bucket.get_blob(path)
             if blob:
                 data_str = blob.download_as_text(encoding="utf-8")
-                # Save to local cache for future instantaneous reads
+                # Save a local copy just in case, but we won't rely on it next time
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 with open(local_path, "w", encoding="utf-8") as f:
                     f.write(data_str)
                 return data_str
             raise FileNotFoundError(f"GCS object {path} not found.")
+            
+    # If not using GCS or as a fallback for local dev, read from local cache
+    if os.path.exists(local_path):
+        with open(local_path, "r", encoding="utf-8") as f:
+            return f.read()
             
     raise FileNotFoundError(f"Local file {local_path} not found.")
 
