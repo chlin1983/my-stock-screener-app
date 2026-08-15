@@ -14,17 +14,13 @@ on:
         required: true
         type: choice
         options:
-          - all_index
-          - watchlist
-          - nasdaq100
-          - dow30
-          - sp500
-          - nasdaq
-          - nyse
-          - amex
-          - all_usa
-          - scan_all_sequentially
-        default: 'all_index'
+          - 'Custom Watchlist'
+          - 'All Index (Dow Jones 30 + Nasdaq 100 + S&P 500)'
+          - 'Full NASDAQ Exchange'
+          - 'Full NYSE Exchange'
+          - 'AMEX Exchange'
+          - 'Run All Sequences Automatically'
+        default: 'All Index (Dow Jones 30 + Nasdaq 100 + S&P 500)'
 
 jobs:
   run-scan:
@@ -63,15 +59,23 @@ jobs:
           
           # If triggered manually, use the provided input. Otherwise scan all universes sequentially
           UNIVERSE="${{ github.event.inputs.universe }}"
-          if [ -z "$UNIVERSE" ] || [ "$UNIVERSE" == "scan_all_sequentially" ]; then
+          if [ -z "$UNIVERSE" ] || [ "$UNIVERSE" == "Run All Sequences Automatically" ]; then
             UNIVERSES="watchlist all_index nasdaq nyse amex"
             for u in $UNIVERSES; do
               echo "============================================="
               echo "Starting scan for universe: $u"
               echo "============================================="
-              python scanner_job.py $u
+              python scanner_job.py "$u"
             done
           else
-            echo "Starting scan for universe: $UNIVERSE"
-            python scanner_job.py $UNIVERSE
+            case "$UNIVERSE" in
+              "Custom Watchlist") TARGET="watchlist" ;;
+              "All Index (Dow Jones 30 + Nasdaq 100 + S&P 500)") TARGET="all_index" ;;
+              "Full NASDAQ Exchange") TARGET="nasdaq" ;;
+              "Full NYSE Exchange") TARGET="nyse" ;;
+              "AMEX Exchange") TARGET="amex" ;;
+              *) TARGET="$UNIVERSE" ;;
+            esac
+            echo "Starting scan for universe: $UNIVERSE ($TARGET)"
+            python scanner_job.py "$TARGET"
           fi
