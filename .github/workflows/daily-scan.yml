@@ -14,17 +14,13 @@ on:
         required: true
         type: choice
         options:
-          - all_index
-          - watchlist
-          - nasdaq100
-          - dow30
-          - sp500
-          - nasdaq
-          - nyse
-          - amex
-          - all_usa
-          - scan_all_sequentially
-        default: 'all_index'
+          - 'Run All Sequences Automatically'
+          - 'Custom Watchlist'
+          - 'All Index (Dow Jones 30 + Nasdaq 100 + S&P 500)'
+          - 'Full NASDAQ Exchange'
+          - 'Full NYSE Exchange'
+          - 'AMEX Exchange'
+        default: 'Run All Sequences Automatically'
 
 jobs:
   run-scan:
