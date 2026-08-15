@@ -10,8 +10,20 @@ on:
   workflow_dispatch:
     inputs:
       universe:
-        description: 'Universe to scan (e.g., all_index, nasdaq, all_usa)'
-        required: false
+        description: 'Universe to scan'
+        required: true
+        type: choice
+        options:
+          - all_index
+          - watchlist
+          - nasdaq100
+          - dow30
+          - sp500
+          - nasdaq
+          - nyse
+          - amex
+          - all_usa
+          - scan_all_sequentially
         default: 'all_index'
 
 jobs:
@@ -51,7 +63,7 @@ jobs:
           
           # If triggered manually, use the provided input. Otherwise scan all universes sequentially
           UNIVERSE="${{ github.event.inputs.universe }}"
-          if [ -z "$UNIVERSE" ]; then
+          if [ -z "$UNIVERSE" ] || [ "$UNIVERSE" == "scan_all_sequentially" ]; then
             UNIVERSES="watchlist all_index nasdaq nyse amex"
             for u in $UNIVERSES; do
               echo "============================================="
