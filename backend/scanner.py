@@ -152,8 +152,10 @@ def get_sp500_tickers():
     except Exception as e:
         print(f"[S&P 500] Nasdaq.com failed: {e} -- using NASDAQ-100 fallback.")
 
-    # --- Source 3: Fallback to Nasdaq-100 (better than nothing) ---
-    print(f"[S&P 500] All sources failed. Falling back to Nasdaq-100 list.")
+    # --- Source 3: Fallback to static list (for Cloud Run) ---
+    print(f"[S&P 500] All sources failed. Falling back to static S&P 500 list.")
+    if hasattr(config, "SP_500_FALLBACK"):
+        return config.SP_500_FALLBACK
     return config.NASDAQ_100_FALLBACK
 
 def _parse_tickers_from_tables(tables, col_names=('Ticker', 'Symbol')):
@@ -594,7 +596,7 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         sp_t  = get_sp500_tickers()
         if not dow_t: dow_t = config.DOW_30_FALLBACK
         if not nas_t: nas_t = config.NASDAQ_100_FALLBACK
-        if not sp_t:  sp_t = config.NASDAQ_100_FALLBACK
+        if not sp_t:  sp_t = getattr(config, "SP_500_FALLBACK", config.NASDAQ_100_FALLBACK)
         tickers = dow_t + nas_t + sp_t
     elif "all_usa" in universe_lower or "usa" in universe_lower:
         # Combine all three major US exchanges
@@ -605,7 +607,7 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         tickers  = nasdaq_t + nyse_t + amex_t
         if not tickers:
             tickers = config.NASDAQ_100_FALLBACK
-    elif "custom" in universe_lower:
+    elif "custom" in universe_lower or "watchlist" in universe_lower:
         tickers = custom_tickers if custom_tickers else config.DEFAULT_WATCHLIST
     else:
         tickers = config.DEFAULT_WATCHLIST
@@ -689,7 +691,7 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
                         "short_ema_values": gmma_res["short_ema_values"],
                         "long_ema_values": gmma_res["long_ema_values"],
                     }
-                    if universe_name.lower() in ["custom", "watchlist"]:
+                    if universe_name.lower() in ["custom", "watchlist", "all_index"]:
                         gmma_all.append(gmma_detail)
                     
                     if gmma_res["is_gmma"]:
@@ -701,7 +703,7 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
                 if (ma20_res["is_pullback"] or 
                     vcp_res["is_vcp"] or 
                     gmma_res["is_gmma"] or 
-                    (universe_name.lower() in ["custom", "watchlist"] and "short_ema_values" in gmma_res)):
+                    (universe_name.lower() in ["custom", "watchlist", "custom watchlist", "all_index"] and "short_ema_values" in gmma_res)):
                     hist_data = {
                         "dates": [d.strftime("%Y-%m-%d") for d in ticker_df.index],
                         "open": ticker_df["Open"].tolist(),
@@ -724,11 +726,29 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         [a["ticker"] for a in gmma_all]
     ))
     ticker_names = {}
-    for t in unique_tickers:
+    print(f"Pre-caching company details for {len(unique_tickers)} tickers...")
+    import concurrent.futures
+    import json
+    from main import get_stock_details
+    from fastapi.responses import Response
+    
+    def fetch_detail(t):
         try:
-            ticker_names[t] = yf.Ticker(t).info.get('longName', t)
-        except Exception:
-            ticker_names[t] = t
+            res = get_stock_details(t)
+            if isinstance(res, Response):
+                data = json.loads(res.body)
+                return t, data.get("name", t)
+            elif isinstance(res, dict):
+                return t, res.get("name", t)
+        except Exception as e:
+            print(f"Error fetching detail for {t}: {e}")
+        return t, t
+        
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        results = list(executor.map(fetch_detail, unique_tickers))
+        
+    for t, name in results:
+        ticker_names[t] = name
             
     for a in ma20_alerts:
         a["name"] = ticker_names.get(a["ticker"], a["ticker"])
