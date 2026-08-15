@@ -39,6 +39,7 @@ interface Candidate {
 }
 
 interface ProposalResponse {
+  id?: string;
   candidates: Candidate[];
   ai_proposal: string;
   filter_params: FilterParams;
@@ -101,18 +102,24 @@ export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = ({ theme = 
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  const [proposalHistory, setProposalHistory] = useState<ProposalResponse[]>([]);
+
   useEffect(() => {
-    fetch(`${BACKEND_URL}/ai/strategy/gmma-proposal/latest`)
+    fetch(`${BACKEND_URL}/ai/strategy/gmma-proposal/history`)
       .then(res => res.json())
       .then(data => {
-        if (data && data.generated_at) {
-          setProposal(data);
-          if (data.filter_params) {
-            setFilters(data.filter_params);
+        if (Array.isArray(data) && data.length > 0) {
+          setProposalHistory(data);
+          const latest = data[0];
+          if (latest && latest.generated_at) {
+            setProposal(latest);
+            if (latest.filter_params) {
+              setFilters(latest.filter_params);
+            }
           }
         }
       })
-      .catch(e => console.error("Failed to load latest proposal", e));
+      .catch(e => console.error("Failed to load proposal history", e));
   }, []);
 
   useEffect(() => {
@@ -181,6 +188,11 @@ export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = ({ theme = 
       const data: ProposalResponse = await res.json();
       setProposal(data);
       if (data.candidates.length > 0) setSelectedCandidate(data.candidates[0]);
+      
+      setProposalHistory(prev => {
+        const updated = [data, ...prev];
+        return updated.slice(0, 50);
+      });
     } catch (e: any) {
       setError(e.message || 'Unknown error');
     } finally {
@@ -321,6 +333,44 @@ export const AIStrategyProposal: React.FC<AIStrategyProposalProps> = ({ theme = 
             </ul>
             <div style={{ marginTop: 6 }}>Stop Loss is set at <strong>1 ATR below</strong> the investor group top (EMA30). Target 1 = 1:2 R/R, Target 2 = 1:3.5 R/R.</div>
           </div>
+
+          {/* Recent Runs */}
+          {proposalHistory.length > 0 && (
+            <div className="glass-panel" style={{ padding: 14, borderRadius: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontWeight: 700, color: 'var(--color-text-main)', fontSize: 12.5 }}>🕒 Recent Runs</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
+                {proposalHistory.map((run, i) => {
+                  const isSelected = proposal?.id ? proposal.id === run.id : proposal?.generated_at === run.generated_at;
+                  return (
+                    <div 
+                      key={run.id || run.generated_at || i}
+                      onClick={() => {
+                        setProposal(run);
+                        if (run.filter_params) setFilters(run.filter_params);
+                        setSelectedCandidate(run.candidates.length > 0 ? run.candidates[0] : null);
+                      }}
+                      style={{
+                        padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                        background: isSelected ? 'rgba(99,102,241,0.15)' : 'var(--bg-tertiary)',
+                        border: `1px solid ${isSelected ? '#6366f1' : 'transparent'}`,
+                        transition: 'all 0.2s', fontSize: 11.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, color: isSelected ? '#a855f7' : 'var(--color-text-main)' }}>
+                          {new Date(run.generated_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                          {run.candidates.length} candidates
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 16 }}>{run.mode === 'ai' ? '✨' : '📋'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Right: Results ── */}
