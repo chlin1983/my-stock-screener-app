@@ -56,7 +56,11 @@ if STORAGE_TYPE == "gcs":
         print("[ERROR] GCS_BUCKET_NAME is not set.")
         print("        Please add it to backend/.env.local")
         print("        See .env.local.example for reference.")
-        input("\nPress Enter to exit...")
+        if sys.stdin and sys.stdin.isatty():
+            try:
+                input("\nPress Enter to exit...")
+            except EOFError:
+                pass
         sys.exit(1)
     print(f"  GCS Bucket    : {GCS_BUCKET}")
     GOOGLE_CREDS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
@@ -137,7 +141,11 @@ except ImportError as e:
     print(f"\n[ERROR] Could not import scanner modules: {e}")
     print("        Make sure you run this from inside the backend/ directory,")
     print("        or use the provided run_scan.bat launcher.")
-    input("\nPress Enter to exit...")
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            input("\nPress Enter to exit...")
+        except EOFError:
+            pass
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
@@ -155,13 +163,21 @@ try:
     )
 except KeyboardInterrupt:
     print("\n\n[INTERRUPTED] Scan cancelled by user (Ctrl+C).")
-    input("\nPress Enter to exit...")
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            input("\nPress Enter to exit...")
+        except EOFError:
+            pass
     sys.exit(0)
 except Exception as e:
     print(f"\n[ERROR] Scan failed: {e}")
     import traceback
     traceback.print_exc()
-    input("\nPress Enter to exit...")
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            input("\nPress Enter to exit...")
+        except EOFError:
+            pass
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
@@ -172,7 +188,7 @@ mins, secs = divmod(int(elapsed), 60)
 
 print()
 print("=" * 60)
-print("  ✅  SCAN COMPLETE")
+print("  [SUCCESS] SCAN COMPLETE")
 print("=" * 60)
 print(f"  Universe      : {results.get('universe', universe)}")
 print(f"  Stocks Scanned: {results.get('scanned_count', 0):,}")
@@ -184,16 +200,20 @@ print(f"  Time Taken    : {mins}m {secs}s")
 print()
 
 if STORAGE_TYPE == "gcs":
-    print(f"  📤 Results pushed to GCS bucket: gs://{GCS_BUCKET}/")
-    print(f"     → Open your Firebase app on ANY PC to view results")
+    print(f"  [GCS] Results pushed to GCS bucket: gs://{GCS_BUCKET}/")
+    print(f"     -> Open your Firebase app on ANY PC to view results")
 else:
     cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "scan_results.json")
-    print(f"  📁 Results saved locally:")
+    print(f"  [LOCAL] Results saved locally:")
     print(f"     {cache_path}")
     print()
-    print(f"  💡 TIP: Set STORAGE_TYPE=gcs in .env.local to share")
-    print(f"          results across all your PCs via your Firebase app.")
+    print(f"  [TIP] Set STORAGE_TYPE=gcs in .env.local to share")
+    print(f"        results across all your PCs via your Firebase app.")
 
 print("=" * 60)
 print()
-input("Press Enter to close this window...")
+if sys.stdin and sys.stdin.isatty():
+    try:
+        input("Press Enter to close this window...")
+    except EOFError:
+        pass
