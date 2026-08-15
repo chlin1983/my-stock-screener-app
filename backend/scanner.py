@@ -608,7 +608,21 @@ def run_scan(universe_name="nasdaq100", custom_tickers=None, ma20_params=None, v
         if not tickers:
             tickers = config.NASDAQ_100_FALLBACK
     elif "custom" in universe_lower or "watchlist" in universe_lower:
-        tickers = custom_tickers if custom_tickers else config.DEFAULT_WATCHLIST
+        if custom_tickers:
+            tickers = custom_tickers
+        else:
+            try:
+                if config.json_exists("custom_watchlists.json"):
+                    wl_data = config.read_json("custom_watchlists.json")
+                    all_t = []
+                    for wl in wl_data.get("watchlists", []):
+                        all_t.extend(wl.get("tickers", []))
+                    tickers = list(set(all_t)) if all_t else config.DEFAULT_WATCHLIST
+                else:
+                    tickers = config.DEFAULT_WATCHLIST
+            except Exception as e:
+                print(f"Error reading custom_watchlists.json: {e}")
+                tickers = config.DEFAULT_WATCHLIST
     else:
         tickers = config.DEFAULT_WATCHLIST
         
