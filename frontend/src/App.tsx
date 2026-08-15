@@ -465,7 +465,7 @@ function App() {
       const allTickers = watchlists.flatMap(wl => wl.tickers || []);
       const uniqueTickers = Array.from(new Set(allTickers));
       payload = {
-        universe: 'custom',
+        universe: 'watchlist',
         custom_tickers: uniqueTickers.length > 0 ? uniqueTickers : null,
       };
     } else {

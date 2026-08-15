@@ -171,7 +171,7 @@ def save_watchlists(req: WatchlistsPayload):
 def get_latest_scan(universe: Optional[str] = None):
     filename = "scan_results.json"
     if universe:
-        universe_clean = "custom" if universe == "watchlist" else universe.lower()
+        universe_clean = "watchlist" if universe == "custom" else universe.lower()
         filename = f"scan_results_{universe_clean}.json"
 
     if not config.json_exists(filename):
@@ -179,8 +179,8 @@ def get_latest_scan(universe: Optional[str] = None):
         if filename != "scan_results.json" and config.json_exists("scan_results.json"):
             fallback_data = config.read_json("scan_results.json")
             fallback_univ = fallback_data.get("universe", "").lower()
-            target_univ = "custom" if universe == "watchlist" else universe.lower()
-            if fallback_univ == target_univ or (fallback_univ == "watchlist" and target_univ == "custom"):
+            target_univ = "watchlist" if universe == "custom" else universe.lower()
+            if fallback_univ == target_univ or (fallback_univ == "custom" and target_univ == "watchlist"):
                 filename = "scan_results.json"
             else:
                 return {
